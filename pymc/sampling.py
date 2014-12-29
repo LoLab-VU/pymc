@@ -7,6 +7,7 @@ from .core import *
 from . import step_methods
 from .progressbar import progress_bar
 from numpy.random import seed
+import logging
 
 __all__ = ['sample', 'iter_sample']
 
@@ -57,6 +58,7 @@ def sample(draws, step, start=None, trace=None, chain=0, njobs=1, tune=None,
     """
     if njobs is None:
         njobs = max(mp.cpu_count() - 2, 1)
+                  
     if njobs > 1:
         try:
             if not len(random_seed) == njobs:
@@ -205,11 +207,27 @@ def _choose_backend(trace, chain, shortcuts=None, **kwds):
 
 
 def _mp_sample(njobs, args):
-    p = mp.Pool(njobs)
+    # If using DREAM stepping method, allocate a shared history array, a count variable, and a variable denoting whether or not the history has been seeded with draws from the prior.
+    mp.log_to_stderr(logging.DEBUG)    
+    if 'Dream' in str(args[0]):
+       step_method = args[0][1]
+       arr_dim = (njobs*args[0][0]+step_method.nseedchains)*step_method.total_var_dimension
+       history_arr = mp.Array('d', [0]*arr_dim)
+       n = mp.Value('i', 0)
+       tf = mp.Value('c', 'F')
+       print 'Launching jobs'
+       p = mp.Pool(njobs, initializer=mp_dream_init, initargs=(history_arr, n, tf, ))
+    else:
+       p = mp.Pool(njobs)
+    print 'Jobs launched'
     traces = p.map(argsample, args)
     p.close()
     return merge_traces(traces)
 
+def mp_dream_init(arr, val, switch):
+      step_methods.Dream_shared_vars.history = arr
+      step_methods.Dream_shared_vars.count = val
+      step_methods.Dream_shared_vars.history_seeded = switch
 
 def stop_tuning(step):
     """ stop tuning the current step method """
