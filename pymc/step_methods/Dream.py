@@ -11,6 +11,10 @@ import numpy as np
 import random
 import Dream_shared_vars
 from datetime import datetime
+import multiprocessing as mp
+import multiprocessing.pool as mp_pool
+import logging
+import traceback
 
 __all__ = ['Dream']
 
@@ -29,6 +33,10 @@ class Dream(ArrayStep):
         self.variables = variables
         self.nseedchains = nseedchains
         self.DEpairs = DEpairs
+        if multitry == False:
+            self.multitry = 1
+        else:
+            self.multitry = multitry
         self.eps = eps
         self.last_logp = None
         self.total_var_dimension = 0
@@ -79,25 +87,36 @@ class Dream(ArrayStep):
         gamma = self.set_gamma(self.iter, self.DEpairs, self.total_var_dimension)
         
         with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-            # Sample without replacement from the population history
-            sampled_chains = self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension)
-    
-        # Sum DEpairs number of chain pairs to give two chains, and take difference of chain sums
-        #chain_differences = np.sum(sampled_chains[0:2*self.DEpairs], axis=0)-np.sum(sampled_chains[2*self.DEpairs:self.DEpairs*4], axis=0)
-        chain_differences = np.array(sampled_chains[0])-np.array(sampled_chains[1])
+            proposed_pts = self.generate_proposal_points(self.multitry, gamma, q0)
+#            # Sample without replacement from the population history
+#            sampled_chains = self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension)
+#    
+#        # Sum DEpairs number of chain pairs to give two chains, and take difference of chain sums
+#        #chain_differences = np.sum(sampled_chains[0:2*self.DEpairs], axis=0)-np.sum(sampled_chains[2*self.DEpairs:self.DEpairs*4], axis=0)
+#        chain_differences = np.array(sampled_chains[0])-np.array(sampled_chains[1])
+#        
+#        #print 'Took difference of chains: '+str(sampled_chains[0:2])+' chain differences = ', chain_differences        
+#        
+#        # e is a random sample from a normal distribution with small sd
+#        e = np.random.normal(0, self.eps, self.total_var_dimension)
+#        
+#        # Generate proposal point
+#        q = q0 + gamma*chain_differences + e        
         
-        print 'Took difference of chains: '+str(sampled_chains[0:2])+' chain differences = ', chain_differences        
+        print 'proposed point = ', proposed_pts        
         
-        # e is a random sample from a normal distribution with small sd
-        e = np.random.normal(0, self.eps, self.total_var_dimension)
-        
-        # Generate proposal point
-        q = q0 + gamma*chain_differences + e        
-        
-        #print 'proposed point = ', q        
-        
-        q_logp = logp(q)        
-        
+        if self.multitry == 1:
+            q_logp = logp(proposed_pts[0])
+            q = proposed_pts[0]
+        else:
+            mp.log_to_stderr(logging.DEBUG)
+            p = mp.Pool(self.multitry)
+            args = zip([self]*self.multitry, proposed_pts)
+            log_ps = p.map(call_logp, args)
+            q_logp_loc = np.argmax(log_ps)
+            q_logp = log_ps[q_logp_loc]
+            q = proposed_pts[q_logp_loc]
+            print 'logps = '+str(log_ps)+' Selected logp = '+str(q_logp)+' Point = '+str(q)
 #        print 'logp of proposed point = ', q_logp        
         
         if self.last_logp == None:
@@ -150,6 +169,18 @@ class Dream(ArrayStep):
         #print 'sampled chains: ', sampled_chains
         return sampled_chains
         
+    def generate_proposal_points(self, n_proposed_pts, gamma, q0):
+        sampled_history_pts = np.array([self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension) for i in range(n_proposed_pts)])
+        if self.DEpairs != 0:
+            chain_differences = [np.sum(sampled_history_pts[i][0:2*self.DEpairs], axis=0)-np.sum(sampled_history_pts[i][2*self.DEpairs:self.DEpairs*4], axis=0) for i in range(len(sampled_history_pts))]
+        else:
+           chain_differences = [sampled_history_pts[0]- sampled_history_pts[1] for i in range(len(sampled_history_pts))]
+        e = np.array([np.random.normal(0, self.eps, self.total_var_dimension) for i in range(n_proposed_pts)])
+        proposed_pts = q0 + gamma*chain_differences + e
+        
+        return proposed_pts
+        
+        
     def record_history(self, nseedchains, ndimensions, q_new, len_history):
         nhistoryrecs = Dream_shared_vars.count.value+nseedchains
         start_loc = nhistoryrecs*ndimensions
@@ -169,5 +200,37 @@ class Dream(ArrayStep):
         print 'saving history'
         filename = prefix+'DREAM_chain_history.npy'
         np.save(filename, history)
+    
+def call_logp(args):
+    #Defined at top level so it can be pickled.
+    
+    #print 'arguments: ',args
+    instance = args[0]
+    #print 'instance: ',instance
+    point = args[1]
+    #print 'point: ',point
+    
+    try:
+        logp_fxn = getattr(instance, 'fs')[0]
+        ordering = getattr(instance, 'ordering')
+        bij = DictToArrayBijection(ordering, {})
+        logp = bij.mapf(logp_fxn)
+        return logp(point)
+    except Exception as e:
+        print traceback.print_exc()
+        print()
+        raise e
         
+class NoDaemonProcess(mp.Process):
+    # make 'daemon' attribute always return False
+    def _get_daemon(self):
+        return False
+    def _set_daemon(self, value):
+        pass
+    daemon = property(_get_daemon, _set_daemon)
+
+#A subclass of multiprocessing.pool.Pool that allows processes to launch child processes (this is necessary for Dream to use multi-try)
+#Taken from http://stackoverflow.com/questions/6974695/python-process-pool-non-daemonic
+class DreamPool(mp_pool.Pool):
+    Process = NoDaemonProcess
         

@@ -8,6 +8,7 @@ from . import step_methods
 from .progressbar import progress_bar
 from numpy.random import seed
 import logging
+from step_methods.Dream import DreamPool
 
 __all__ = ['sample', 'iter_sample']
 
@@ -216,7 +217,7 @@ def _mp_sample(njobs, args):
        n = mp.Value('i', 0)
        tf = mp.Value('c', 'F')
        print 'Launching jobs'
-       p = mp.Pool(njobs, initializer=mp_dream_init, initargs=(history_arr, n, tf, ))
+       p = DreamPool(njobs, initializer=mp_dream_init, initargs=(history_arr, n, tf, ))
     else:
        p = mp.Pool(njobs)
     print 'Jobs launched'
