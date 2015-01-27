@@ -113,6 +113,7 @@ class Dream(ArrayStep):
             p = mp.Pool(self.multitry)
             args = zip([self]*self.multitry, proposed_pts)
             log_ps = p.map(call_logp, args)
+            p.close()
             q_logp_loc = np.argmax(log_ps)
             q_logp = log_ps[q_logp_loc]
             q = proposed_pts[q_logp_loc]
@@ -203,23 +204,15 @@ class Dream(ArrayStep):
     
 def call_logp(args):
     #Defined at top level so it can be pickled.
-    
-    #print 'arguments: ',args
     instance = args[0]
-    #print 'instance: ',instance
     point = args[1]
-    #print 'point: ',point
     
-    try:
-        logp_fxn = getattr(instance, 'fs')[0]
-        ordering = getattr(instance, 'ordering')
-        bij = DictToArrayBijection(ordering, {})
-        logp = bij.mapf(logp_fxn)
-        return logp(point)
-    except Exception as e:
-        print traceback.print_exc()
-        print()
-        raise e
+    logp_fxn = getattr(instance, 'fs')[0]
+    ordering = getattr(instance, 'ordering')
+    bij = DictToArrayBijection(ordering, {})
+    logp = bij.mapf(logp_fxn)
+    return logp(point)
+
         
 class NoDaemonProcess(mp.Process):
     # make 'daemon' attribute always return False
