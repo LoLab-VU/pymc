@@ -19,7 +19,7 @@ import traceback
 __all__ = ['Dream']
 
 class Dream(ArrayStep):
-    def __init__(self, variables=None, nseedchains=100, convergenceCriteria=1.1, nCR=3, DEpairs=1, adaptationRate=.65, eps=5e-6, verbose=False, save_history = False, start_random=True, snooker=False, multitry=False, model=None, **kwargs):
+    def __init__(self, variables=None, nseedchains=100, convergenceCriteria=1.1, nCR=3, DEpairs=1, adaptationRate=.65, eps=5e-6, verbose=False, save_history = False, start_random=True, snooker=10, multitry=False, model=None, **kwargs):
         
         model = modelcontext(model)
                 
@@ -33,6 +33,7 @@ class Dream(ArrayStep):
         self.variables = variables
         self.nseedchains = nseedchains
         self.DEpairs = DEpairs
+        self.snooker = snooker
         if multitry == False:
             self.multitry = 1
         else:
@@ -84,10 +85,17 @@ class Dream(ArrayStep):
                 raise Exception('Dream should be run with multiple chains in parallel.  Set njobs > 1.')
                 
         # Set gamma depending on iteration; every 5th iteration over all chains, large jumps are allowed
-        gamma = self.set_gamma(self.iter, self.DEpairs, self.total_var_dimension)
+        #Gamma for snooker update is drawn from U[1.2, 2.2] as suggested in ter Braak 2008.     
+        
+        gamma = self.set_gamma(self.iter, self.DEpairs, self.total_var_dimension, self.snooker)
+        
         
         with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-            proposed_pts = self.generate_proposal_points(self.multitry, gamma, q0)
+            if self.iter == 0 or self.snooker == 0 or self.iter % self.snooker != 0:
+                proposed_pts = self.generate_proposal_points(self.multitry, gamma, q0, snooker=False)
+
+            else:
+                proposed_pts = self.generate_proposal_points(self.multitry, gamma, q0, snooker=True)
 #            # Sample without replacement from the population history
 #            sampled_chains = self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension)
 #    
@@ -103,20 +111,21 @@ class Dream(ArrayStep):
 #        # Generate proposal point
 #        q = q0 + gamma*chain_differences + e        
         
-        print 'proposed point = ', proposed_pts        
+        print 'proposed point = ', proposed_pts 
+        print 'proposed points squeezed = ',np.squeeze(proposed_pts)
         
         if self.multitry == 1:
-            q_logp = logp(proposed_pts[0])
-            q = proposed_pts[0]
+            q_logp = logp(np.squeeze(proposed_pts))
+            q = np.squeeze(proposed_pts)
         else:
             mp.log_to_stderr(logging.DEBUG)
             p = mp.Pool(self.multitry)
-            args = zip([self]*self.multitry, proposed_pts)
+            args = zip([self]*self.multitry, np.squeeze(proposed_pts))
             log_ps = p.map(call_logp, args)
             p.close()
             q_logp_loc = np.argmax(log_ps)
             q_logp = log_ps[q_logp_loc]
-            q = proposed_pts[q_logp_loc]
+            q = np.squeeze(proposed_pts[q_logp_loc])
             print 'logps = '+str(log_ps)+' Selected logp = '+str(q_logp)+' Point = '+str(q)
 #        print 'logp of proposed point = ', q_logp        
         
@@ -139,10 +148,13 @@ class Dream(ArrayStep):
         self.iter += 1
         return q_new
         
-    def set_gamma(self, iteration, DEpairs, ndimensions):
+    def set_gamma(self, iteration, DEpairs, ndimensions, snooker_frequency):
         if iteration > 0 and iteration%5 == 0:
             gamma = np.array([1.0])
         
+        elif iteration > 0 and snooker_frequency != 0 and iteration % snooker_frequency == 0:        
+            gamma = np.random.uniform(1.2, 2.2)
+            
         else:
             gamma = np.array([2.38 / np.sqrt( 2 * DEpairs  * ndimensions)])
         
@@ -159,8 +171,11 @@ class Dream(ArrayStep):
             draw = np.append(draw, var_draw)
         return draw.flatten()
 
-    def sample_from_history(self, nseedchains, DEpairs, ndimensions):
-        chain_num = random.sample(range(Dream_shared_vars.count.value+nseedchains), DEpairs*4)
+    def sample_from_history(self, nseedchains, DEpairs, ndimensions, snooker=False):
+        if snooker is False:
+            chain_num = random.sample(range(Dream_shared_vars.count.value+nseedchains), DEpairs*4)
+        else:
+            chain_num = random.sample(range(Dream_shared_vars.count.value+nseedchains), 1)
         start_locs = [i*ndimensions for i in chain_num]
         end_locs = [i+ndimensions for i in start_locs]
         sampled_chains = [Dream_shared_vars.history[start_loc:end_loc] for start_loc, end_loc in zip(start_locs, end_locs)]
@@ -170,18 +185,86 @@ class Dream(ArrayStep):
         #print 'sampled chains: ', sampled_chains
         return sampled_chains
         
-    def generate_proposal_points(self, n_proposed_pts, gamma, q0):
-        sampled_history_pts = np.array([self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension) for i in range(n_proposed_pts)])
-        if self.DEpairs != 0:
-            chain_differences = [np.sum(sampled_history_pts[i][0:2*self.DEpairs], axis=0)-np.sum(sampled_history_pts[i][2*self.DEpairs:self.DEpairs*4], axis=0) for i in range(len(sampled_history_pts))]
-        else:
-           chain_differences = [sampled_history_pts[0]- sampled_history_pts[1] for i in range(len(sampled_history_pts))]
-        e = np.array([np.random.normal(0, self.eps, self.total_var_dimension) for i in range(n_proposed_pts)])
-        proposed_pts = q0 + gamma*chain_differences + e
+    def generate_proposal_points(self, n_proposed_pts, gamma, q0, snooker):
+        if snooker is False:
+            sampled_history_pts = np.array([self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension) for i in range(n_proposed_pts)])
+            if self.DEpairs != 0:
+                chain_differences = [np.sum(sampled_history_pts[i][0:2*self.DEpairs], axis=0)-np.sum(sampled_history_pts[i][2*self.DEpairs:self.DEpairs*4], axis=0) for i in range(len(sampled_history_pts))]
+            else:
+                chain_differences = [sampled_history_pts[0]- sampled_history_pts[1] for i in range(len(sampled_history_pts))]
+            e = np.array([np.random.normal(0, self.eps, self.total_var_dimension) for i in range(n_proposed_pts)])
+            proposed_pts = q0 + gamma*chain_differences + e
         
+        else:
+            print 'n_proposed_pts: ',n_proposed_pts
+            print 'gamma: ',gamma
+            print 'q0: ', q0
+            proposed_pts = self.snooker_update(n_proposed_pts, gamma, q0)
+            
         return proposed_pts
         
+    def snooker_update(self, n_proposed_pts, gamma, q0):
+        sampled_history_pt = [self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension, snooker=True) for i in range(n_proposed_pts)]
+        print 'sampled history pt: ',sampled_history_pt
+        print 'sampled history pts squeezed: ',np.squeeze(sampled_history_pt)
+        print 'point 1: ',np.squeeze(sampled_history_pt)[0]
+        print 'point 2: ',np.squeeze(sampled_history_pt)[1]
+        #Find mutually orthogonal vectors spanning current location and a randomly chosen chain from history
+        ortho_vecs = []
+        for i in range(n_proposed_pts):        
+            vecs, r = np.linalg.qr(np.column_stack((q0, np.squeeze(sampled_history_pt)[i])))
+            print 'appended vector'
+            ortho_vecs.append(vecs)
+        print 'ortho vecs: ', ortho_vecs
+        print 'ortho vec list: ', [ortho_vecs[0][:,0], ortho_vecs[0][:,1]]
+        print 'len ortho_vecs: ',len(ortho_vecs)
+
+        #Determine orthogonal projection of two other randomly chosen chains onto this span
+        chains_to_be_projected = np.squeeze([np.array([self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension, snooker=True) for i in range(2)]) for x in range(n_proposed_pts)])
+        print 'chains_to_be_projected: ',chains_to_be_projected
+        print 'len chains ',len(chains_to_be_projected)
+        projected_pts = []
+        for vec_set in range(len(ortho_vecs)):
+            print 'vec set: ',vec_set
+            pts_for_set = []
+            for chain_n in range(2):
+                print 'chain_n: ',chain_n
+                print 'all ortho vecs: ',ortho_vecs
+                ortho_vec_list = [ortho_vecs[vec_set][:,0], ortho_vecs[vec_set][:,1]]
+                print 'Ortho vec list: ',np.array(ortho_vec_list)
+                print 'all chains to be project: ',chains_to_be_projected
+                print 'Chains to be projected: ',chains_to_be_projected[vec_set]
+                print 'chain 1: ',chains_to_be_projected[vec_set][0]
+                print 'chain 2: ',chains_to_be_projected[vec_set][1]
+                
+                pts_for_set.append([self.project_chains(ortho_vec_list, chains_to_be_projected[vec_set][chain_n])])
+            projected_pts.append(pts_for_set)
+            
+        print 'projected pts: ',projected_pts
+        print 'len projected pts: ', len(projected_pts)
+        print 'point 1: ', projected_pts[0][0]
+        print 'point 2: ', projected_pts[0][1]
         
+        #Calculate difference between projected points
+        chain_differences = np.array([np.array(projected_pts[i][0]) - np.array(projected_pts[i][1]) for i in range(n_proposed_pts)])
+        print 'chain_differences: ',chain_differences
+        
+        #And use difference to propose a new point
+        proposed_pts = q0 + gamma*chain_differences
+        
+        return proposed_pts
+    
+    def project_chains(self, ortho_vecs, chain_to_be_projected):
+        sigmadict = {len(ortho_vecs):1}
+        b0 = chain_to_be_projected
+        for i, vec in enumerate(ortho_vecs):
+            sigma = np.dot(chain_to_be_projected, vec)/np.dot(vec, vec) if np.dot(vec, vec) > 1e-20 else 0
+            sigmadict[i] = sigma
+            chain_to_be_projected = chain_to_be_projected - sigma*vec
+        ortho_proj = chain_to_be_projected
+        pt_on_line = b0 - ortho_proj
+        return pt_on_line
+    
     def record_history(self, nseedchains, ndimensions, q_new, len_history):
         nhistoryrecs = Dream_shared_vars.count.value+nseedchains
         start_loc = nhistoryrecs*ndimensions
