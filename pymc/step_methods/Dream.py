@@ -123,6 +123,7 @@ class Dream(ArrayStep):
             args = zip([self]*self.multitry, np.squeeze(proposed_pts))
             log_ps = p.map(call_logp, args)
             p.close()
+            p.join()
             q_logp_loc = np.argmax(log_ps)
             q_logp = log_ps[q_logp_loc]
             q = np.squeeze(proposed_pts[q_logp_loc])
@@ -204,6 +205,7 @@ class Dream(ArrayStep):
         return proposed_pts
         
     def snooker_update(self, n_proposed_pts, gamma, q0):
+        print 'iteration: ',self.iter,' running snooker update'
         sampled_history_pt = [self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension, snooker=True) for i in range(n_proposed_pts)]
         print 'sampled history pt: ',sampled_history_pt
         print 'sampled history pts squeezed: ',np.squeeze(sampled_history_pt)
@@ -211,10 +213,14 @@ class Dream(ArrayStep):
         print 'point 2: ',np.squeeze(sampled_history_pt)[1]
         #Find mutually orthogonal vectors spanning current location and a randomly chosen chain from history
         ortho_vecs = []
-        for i in range(n_proposed_pts):        
-            vecs, r = np.linalg.qr(np.column_stack((q0, np.squeeze(sampled_history_pt)[i])))
-            print 'appended vector'
-            ortho_vecs.append(vecs)
+        if n_proposed_pts == 1:
+           vecs, r = np.linalg.qr(np.column_stack((q0, np.squeeze(sampled_history_pt))))
+           ortho_vecs.append(vecs) 
+        else:
+            for i in range(n_proposed_pts):        
+                vecs, r = np.linalg.qr(np.column_stack((q0, np.squeeze(sampled_history_pt)[i])))
+                print 'appended vector'
+                ortho_vecs.append(vecs)
         print 'ortho vecs: ', ortho_vecs
         print 'ortho vec list: ', [ortho_vecs[0][:,0], ortho_vecs[0][:,1]]
         print 'len ortho_vecs: ',len(ortho_vecs)
