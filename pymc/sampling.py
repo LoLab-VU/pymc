@@ -9,6 +9,7 @@ from .progressbar import progress_bar
 from numpy.random import seed
 import logging
 from step_methods.Dream import DreamPool
+import traceback
 
 __all__ = ['sample', 'iter_sample']
 
@@ -209,24 +210,40 @@ def _choose_backend(trace, chain, shortcuts=None, **kwds):
 
 def _mp_sample(njobs, args):
     # If using DREAM stepping method, allocate a shared history array, a count variable, and a variable denoting whether or not the history has been seeded with draws from the prior.
-    mp.log_to_stderr(logging.DEBUG)    
+    #mp.log_to_stderr(logging.DEBUG)    
     if 'Dream' in str(args[0]):
        step_method = args[0][1]
        arr_dim = (njobs*args[0][0]+step_method.nseedchains)*step_method.total_var_dimension
+       current_position_dim = njobs*step_method.total_var_dimension
        history_arr = mp.Array('d', [0]*arr_dim)
+       current_position_arr = mp.Array('d', [0]*current_position_dim)
+       nchains = mp.Value('i', njobs)
+       crossover_probabilities = mp.Array('d', [0]*50)
+       ncrossover_updates = mp.Array('d', [0]*50)
+       delta_m = mp.Array('d', [0]*50)
        n = mp.Value('i', 0)
        tf = mp.Value('c', 'F')
        print 'Launching jobs'
-       p = DreamPool(njobs, initializer=mp_dream_init, initargs=(history_arr, n, tf, ))
+       p = DreamPool(njobs, initializer=mp_dream_init, initargs=(history_arr, current_position_arr, nchains, crossover_probabilities, ncrossover_updates, delta_m, n, tf, ))
     else:
        p = mp.Pool(njobs)
     print 'Jobs launched'
-    traces = p.map(argsample, args)
+    try:
+        traces = p.map(argsample, args)
+    except Exception as e:
+        traceback.print_exc()
+        raise e
     p.close()
+    p.join()
     return merge_traces(traces)
 
-def mp_dream_init(arr, val, switch):
+def mp_dream_init(arr, cp_arr, nchains, crossover_probs, ncrossover_updates, delta_m, val, switch):
       step_methods.Dream_shared_vars.history = arr
+      step_methods.Dream_shared_vars.current_positions = cp_arr
+      step_methods.Dream_shared_vars.nchains = nchains
+      step_methods.Dream_shared_vars.cross_probs = crossover_probs
+      step_methods.Dream_shared_vars.ncr_updates = ncrossover_updates
+      step_methods.Dream_shared_vars.delta_m = delta_m
       step_methods.Dream_shared_vars.count = val
       step_methods.Dream_shared_vars.history_seeded = switch
 
