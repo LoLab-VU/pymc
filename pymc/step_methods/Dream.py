@@ -126,9 +126,9 @@ class Dream(ArrayStep):
 
             else:
                 #print 'Proposing pts with snooker update. q0: ',q0,' CR: ',CR
-                proposed_pts = self.generate_proposal_points(self.multitry, gamma, q0, CR, snooker=True)
+                proposed_pts, z = self.generate_proposal_points(1, gamma, q0, CR, snooker=True)
         
-        if self.multitry == 1:
+        if self.multitry == 1 or run_snooker == True:
             q_logp = logp(np.squeeze(proposed_pts))
             q = np.squeeze(proposed_pts)
         else:
@@ -174,7 +174,7 @@ class Dream(ArrayStep):
         if self.last_logp == None:
             self.last_logp = logp(q0)
         
-        if self.multitry > 1:
+        if self.multitry > 1 and run_snooker == False:
             np.append(ref_log_ps, self.last_logp)
 #            ref_logp_min_loc = np.argmin(ref_log_ps)
 #            ref_logp_min = ref_log_ps[ref_logp_min_loc]
@@ -198,13 +198,19 @@ class Dream(ArrayStep):
             print 'ratio logp prop/logp ref: ',np.log10(sum_pos_proposal_logps) - np.log10(sum_pos_reference_logps)
             q_new = metrop_select(sum_proposal_logps - sum_reference_logps, q_proposal, q0)
             q_logp = log_ps[random_logp_loc]
+        elif run_snooker == True:
+            numerator = q_logp*(np.linalg.norm(q-z)**(self.total_var_dimension-1))
+            denominator = self.last_logp*(np.linalg.norm(q0-z)**(self.total_var_dimension-1))
+            q_new = metrop_select(numerator - denominator, q, q0)
         else:    
             q_new = metrop_select(q_logp - self.last_logp, q, q0)
         
-        if np.array_equal(q0, q_new):
+        if np.array_equal(q0, q_new) and self.multitry > 1 and run_snooker == False:
             print 'Did not accept point. Old logp: '+str(self.last_logp)+' Old sum logps: '+str(sum_reference_logps)+' Tested sum logps: '+str(sum_proposal_logps)+' Tested logp: '+str(q_logp)+' Logp ratio: ',sum_proposal_logps-sum_reference_logps
+        elif np.array_equal(q0, q_new) and run_snooker == True:
+            print 'Did not accept point. Old logp: '+str(self.last_logp)+' Old weighted logp '+str(denominator)+' Tested weighted logp: '+str(numerator)+' Tested logp: '+str(q_logp)
         else:
-            print 'Accepted point. Old logp: ',str(self.last_logp)+' Old sum logps: ',sum_reference_logps, 'Tested sum logps: ',sum_proposal_logps,' New logp: ',str(q_logp)+' Logp ratio: ',sum_proposal_logps-sum_reference_logps
+            print 'Accepted point. Old logp: ',str(self.last_logp)+' New logp: ',str(q_logp)
             self.last_logp = q_logp
         
         #Place new point in history
@@ -343,10 +349,10 @@ class Dream(ArrayStep):
             #print n_proposed_pts,' proposed pts generated without snooker update. Proposed pts = ',proposed_pts  
         
         else:
-            proposed_pts = self.snooker_update(n_proposed_pts, gamma, q0)
+            proposed_pts, z = self.snooker_update(n_proposed_pts, gamma, q0)
             #print n_proposed_pts,' proposed pts generated with snooker update. Proposed pts = ',proposed_pts
         
-        if self.multitry > 1:
+        if self.multitry > 1 and snooker is False:
             #print 'points before crossover: ',proposed_pts
             if n_proposed_pts > 1:
                 #Perform crossover
@@ -373,8 +379,10 @@ class Dream(ArrayStep):
                         proposed_pts[0][d] = q0[d] 
                         
         #print 'points after crossover: ',proposed_pts
-        
-        return proposed_pts
+        if snooker is False:
+            return proposed_pts
+        else:
+            return proposed_pts, z
         
     def snooker_update(self, n_proposed_pts, gamma, q0):
         print 'iteration: ',self.iter,' running snooker update'
@@ -406,7 +414,7 @@ class Dream(ArrayStep):
         #And use difference to propose a new point
         proposed_pts = q0 + gamma*chain_differences
         
-        return proposed_pts
+        return proposed_pts, sampled_history_pt
     
     def project_chains(self, ortho_vecs, chain_to_be_projected):
         sigmadict = {len(ortho_vecs):1}
