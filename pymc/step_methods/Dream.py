@@ -120,7 +120,7 @@ class Dream(ArrayStep):
         gamma = self.set_gamma(self.iter, self.DEpairs, self.total_var_dimension, run_snooker, CR)
         
         with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-            if self.iter == 0 or self.snooker == 0 or run_snooker == False:
+            if self.snooker == 0 or run_snooker == False:
                 #print 'Proposing pts with no snooker update. q0: ',q0,' CR: ',CR
                 proposed_pts = self.generate_proposal_points(self.multitry, gamma, q0, CR, snooker=False)
 
