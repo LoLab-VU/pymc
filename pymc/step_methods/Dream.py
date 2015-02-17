@@ -133,11 +133,14 @@ class Dream(ArrayStep):
             q = np.squeeze(proposed_pts)
         else:
             #mp.log_to_stderr(logging.DEBUG)
-            p = mp.Pool(self.multitry)
-            args = zip([self]*self.multitry, np.squeeze(proposed_pts))
-            log_ps = p.map(call_logp, args)
-            p.close()
-            p.join()
+            #p = mp.Pool(self.multitry)
+            #args = zip([self]*self.multitry, np.squeeze(proposed_pts))
+            #log_ps = p.map(call_logp, args)
+            #p.close()
+            #p.join()
+            log_ps = []
+            for pt in np.squeeze(proposed_pts):
+                log_ps.append(logp(pt))
             #Randomly select one of the tested points with probability proportional to the probability density at the point
             q_logp_min_loc = np.argmin(log_ps)
             q_logp_min = log_ps[q_logp_min_loc]
