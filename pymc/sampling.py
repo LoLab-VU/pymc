@@ -218,9 +218,10 @@ def _mp_sample(njobs, args):
        history_arr = mp.Array('d', [0]*arr_dim)
        current_position_arr = mp.Array('d', [0]*current_position_dim)
        nchains = mp.Value('i', njobs)
-       crossover_probabilities = mp.Array('d', [0]*50)
-       ncrossover_updates = mp.Array('d', [0]*50)
-       delta_m = mp.Array('d', [0]*50)
+       nCR = step_method.nCR
+       crossover_probabilities = mp.Array('d', [0]*nCR)
+       ncrossover_updates = mp.Array('d', [0]*nCR)
+       delta_m = mp.Array('d', [0]*nCR)
        n = mp.Value('i', 0)
        tf = mp.Value('c', 'F')
        print 'Launching jobs'
