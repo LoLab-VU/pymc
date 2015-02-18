@@ -99,7 +99,7 @@ class Dream(ArrayStep):
         
         if self.snooker != 0:
             snooker_choice = np.where(np.random.multinomial(1, [self.snooker, 1-self.snooker])==1)
-            print 'Snooker choice: ',snooker_choice
+            #print 'Snooker choice: ',snooker_choice
             if snooker_choice[0] == 0:
                 run_snooker = True
             else:
@@ -145,12 +145,12 @@ class Dream(ArrayStep):
             q_logp_min_loc = np.argmin(log_ps)
             q_logp_min = log_ps[q_logp_min_loc]
             positive_logps = log_ps + abs(q_logp_min)+1
-            print 'logps: ',log_ps
-            print 'positive logps: ',positive_logps
+            #print 'logps: ',log_ps
+            #print 'positive logps: ',positive_logps
             sum_proposal_logps = np.sum(log_ps)
             sum_positive_proposal_logps = np.sum(positive_logps)
             logp_draw_prob = abs(positive_logps/sum_positive_proposal_logps)
-            print 'logp draw prob: ',logp_draw_prob
+            #print 'logp draw prob: ',logp_draw_prob
             random_logp_loc = np.where(np.random.multinomial(1, logp_draw_prob)==1)[0]
             #print 'logp location: ',random_logp_loc
             q_proposal = np.squeeze(proposed_pts[random_logp_loc])
@@ -163,11 +163,14 @@ class Dream(ArrayStep):
             
             #Compute posterior density at reference points.
             if self.multitry > 2:
-                p = mp.Pool(self.multitry-1)
-                args = zip([self]*self.multitry, np.squeeze(reference_pts))
-                ref_log_ps = p.map(call_logp, args)
-                p.close()
-                p.join()
+                #p = mp.Pool(self.multitry-1)
+                #args = zip([self]*self.multitry, np.squeeze(reference_pts))
+                #ref_log_ps = p.map(call_logp, args)
+                #p.close()
+                #p.join()
+                ref_log_ps = []
+                for pt in np.squeeze(reference_pts):
+                    ref_log_ps.append(logp(pt))
             else:
                 ref_log_ps = np.array([logp(np.squeeze(reference_pts))])
             
@@ -192,13 +195,13 @@ class Dream(ArrayStep):
             sum_pos_proposal_logps = np.sum(positive_proposal_logps)
             sum_reference_logps = np.sum(ref_log_ps)
             sum_pos_reference_logps = np.sum(positive_reference_logps)
-            print 'Sum reference logps: ',sum_reference_logps
-            print 'Sum proposal logps: ',sum_proposal_logps
-            print 'log pos ref logps: ',np.log10(sum_pos_reference_logps)
-            print 'log pos prop logps: ',np.log10(sum_pos_proposal_logps)
-            print 'ratio prop/ref: ',sum_proposal_logps - sum_reference_logps
-            print 'ratio pos prop/pos ref: ',sum_pos_proposal_logps - sum_pos_reference_logps
-            print 'ratio logp prop/logp ref: ',np.log10(sum_pos_proposal_logps) - np.log10(sum_pos_reference_logps)
+            #print 'Sum reference logps: ',sum_reference_logps
+            #print 'Sum proposal logps: ',sum_proposal_logps
+            #print 'log pos ref logps: ',np.log10(sum_pos_reference_logps)
+            #print 'log pos prop logps: ',np.log10(sum_pos_proposal_logps)
+            #print 'ratio prop/ref: ',sum_proposal_logps - sum_reference_logps
+            #print 'ratio pos prop/pos ref: ',sum_pos_proposal_logps - sum_pos_reference_logps
+            #print 'ratio logp prop/logp ref: ',np.log10(sum_pos_proposal_logps) - np.log10(sum_pos_reference_logps)
             q_new = metrop_select(sum_proposal_logps - sum_reference_logps, q_proposal, q0)
             q_logp = log_ps[random_logp_loc]
         elif run_snooker == True:
