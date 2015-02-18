@@ -97,139 +97,144 @@ class Dream(ArrayStep):
         # Set gamma depending on iteration; every 5th iteration over all chains, large jumps are allowed
         #Gamma for snooker update is drawn from U[1.2, 2.2] as suggested in ter Braak 2008.     
         
-        if self.snooker != 0:
-            snooker_choice = np.where(np.random.multinomial(1, [self.snooker, 1-self.snooker])==1)
-            #print 'Snooker choice: ',snooker_choice
-            if snooker_choice[0] == 0:
-                run_snooker = True
+        try:
+            if self.snooker != 0:
+                snooker_choice = np.where(np.random.multinomial(1, [self.snooker, 1-self.snooker])==1)
+                #print 'Snooker choice: ',snooker_choice
+                if snooker_choice[0] == 0:
+                    run_snooker = True
+                else:
+                    run_snooker = False
+                print 'Snooker decision: ',run_snooker
             else:
                 run_snooker = False
-            print 'Snooker decision: ',run_snooker
-        else:
-            run_snooker = False
         
-        if self.multitry > 1:
-            #Set CR value for generating proposal point
-            CR_loc = np.where(np.random.multinomial(1, self.CR_probabilities)==1)
-            #print 'CR_loc chosen: ',CR_loc
-            CR = self.CR_values[CR_loc]
-            #print 'Set CR to: ',CR
-        else:
-            CR = 1    
-        
-        gamma = self.set_gamma(self.iter, self.DEpairs, self.total_var_dimension, run_snooker, CR)
-        
-        with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-            if self.snooker == 0 or run_snooker == False:
-                #print 'Proposing pts with no snooker update. q0: ',q0,' CR: ',CR
-                proposed_pts = self.generate_proposal_points(self.multitry, gamma, q0, CR, snooker=False)
-
+            if self.multitry > 1:
+                #Set CR value for generating proposal point
+                CR_loc = np.where(np.random.multinomial(1, self.CR_probabilities)==1)
+                #print 'CR_loc chosen: ',CR_loc
+                CR = self.CR_values[CR_loc]
+                #print 'Set CR to: ',CR
             else:
-                #print 'Proposing pts with snooker update. q0: ',q0,' CR: ',CR
-                proposed_pts, z = self.generate_proposal_points(1, gamma, q0, CR, snooker=True)
+                CR = 1    
         
-        if self.multitry == 1 or run_snooker == True:
-            q_logp = logp(np.squeeze(proposed_pts))
-            q = np.squeeze(proposed_pts)
-        else:
-            #mp.log_to_stderr(logging.DEBUG)
-            #p = mp.Pool(self.multitry)
-            #args = zip([self]*self.multitry, np.squeeze(proposed_pts))
-            #log_ps = p.map(call_logp, args)
-            #p.close()
-            #p.join()
-            log_ps = []
-            for pt in np.squeeze(proposed_pts):
-                log_ps.append(logp(pt))
-            #Randomly select one of the tested points with probability proportional to the probability density at the point
-            q_logp_min_loc = np.argmin(log_ps)
-            q_logp_min = log_ps[q_logp_min_loc]
-            positive_logps = log_ps + abs(q_logp_min)+1
-            #print 'logps: ',log_ps
-            #print 'positive logps: ',positive_logps
-            sum_proposal_logps = np.sum(log_ps)
-            sum_positive_proposal_logps = np.sum(positive_logps)
-            logp_draw_prob = abs(positive_logps/sum_positive_proposal_logps)
-            #print 'logp draw prob: ',logp_draw_prob
-            random_logp_loc = np.where(np.random.multinomial(1, logp_draw_prob)==1)[0]
-            #print 'logp location: ',random_logp_loc
-            q_proposal = np.squeeze(proposed_pts[random_logp_loc])
-            #print 'logps proposed = '+str(log_ps)+' Selected logp = '+str(log_ps[random_logp_loc])+' Point = '+str(q_proposal)
-            
-            #Draw reference points around the randomly selected proposal point
+            gamma = self.set_gamma(self.iter, self.DEpairs, self.total_var_dimension, run_snooker, CR)
+        
             with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-                reference_pts = self.generate_proposal_points(self.multitry-1, gamma, q_proposal, CR, snooker=False)
-                #print 'Generated reference points: ',reference_pts
-            
-            #Compute posterior density at reference points.
-            if self.multitry > 2:
-                #p = mp.Pool(self.multitry-1)
-                #args = zip([self]*self.multitry, np.squeeze(reference_pts))
-                #ref_log_ps = p.map(call_logp, args)
+                if self.snooker == 0 or run_snooker == False:
+                    #print 'Proposing pts with no snooker update. q0: ',q0,' CR: ',CR
+                    proposed_pts = self.generate_proposal_points(self.multitry, gamma, q0, CR, snooker=False)
+
+                else:
+                    #print 'Proposing pts with snooker update. q0: ',q0,' CR: ',CR
+                    proposed_pts, z = self.generate_proposal_points(1, gamma, q0, CR, snooker=True)
+        
+            if self.multitry == 1 or run_snooker == True:
+                q_logp = logp(np.squeeze(proposed_pts))
+                q = np.squeeze(proposed_pts)
+            else:
+                #mp.log_to_stderr(logging.DEBUG)
+                #p = mp.Pool(self.multitry)
+                #args = zip([self]*self.multitry, np.squeeze(proposed_pts))
+                #log_ps = p.map(call_logp, args)
                 #p.close()
                 #p.join()
-                ref_log_ps = []
-                for pt in np.squeeze(reference_pts):
-                    ref_log_ps.append(logp(pt))
-            else:
-                ref_log_ps = np.array([logp(np.squeeze(reference_pts))])
+                log_ps = []
+                for pt in np.squeeze(proposed_pts):
+                    log_ps.append(logp(pt))
+                #Randomly select one of the tested points with probability proportional to the probability density at the point
+                q_logp_min_loc = np.argmin(log_ps)
+                q_logp_min = log_ps[q_logp_min_loc]
+                positive_logps = log_ps + abs(q_logp_min)+1
+                #print 'logps: ',log_ps
+                #print 'positive logps: ',positive_logps
+                sum_proposal_logps = np.sum(log_ps)
+                sum_positive_proposal_logps = np.sum(positive_logps)
+                logp_draw_prob = abs(positive_logps/sum_positive_proposal_logps)
+                #print 'logp draw prob: ',logp_draw_prob
+                random_logp_loc = np.where(np.random.multinomial(1, logp_draw_prob)==1)[0]
+                #print 'logp location: ',random_logp_loc
+                q_proposal = np.squeeze(proposed_pts[random_logp_loc])
+                #print 'logps proposed = '+str(log_ps)+' Selected logp = '+str(log_ps[random_logp_loc])+' Point = '+str(q_proposal)
             
-#        print 'logp of proposed point = ', q_logp        
-        #print 'Reference logps = ',ref_log_ps
+                #Draw reference points around the randomly selected proposal point
+                with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
+                    reference_pts = self.generate_proposal_points(self.multitry-1, gamma, q_proposal, CR, snooker=False)
+                    #print 'Generated reference points: ',reference_pts
+            
+                #Compute posterior density at reference points.
+                if self.multitry > 2:
+                    #p = mp.Pool(self.multitry-1)
+                    #args = zip([self]*self.multitry, np.squeeze(reference_pts))
+                    #ref_log_ps = p.map(call_logp, args)
+                    #p.close()
+                    #p.join()
+                    ref_log_ps = []
+                    for pt in np.squeeze(reference_pts):
+                        ref_log_ps.append(logp(pt))
+                else:
+                    ref_log_ps = np.array([logp(np.squeeze(reference_pts))])
+            
+                #        print 'logp of proposed point = ', q_logp        
+                #print 'Reference logps = ',ref_log_ps
         
-        if self.last_logp == None:
-            self.last_logp = logp(q0)
+            if self.last_logp == None:
+                self.last_logp = logp(q0)
         
-        if self.multitry > 1 and run_snooker == False:
-            np.append(ref_log_ps, self.last_logp)
-#            ref_logp_min_loc = np.argmin(ref_log_ps)
-#            ref_logp_min = ref_log_ps[ref_logp_min_loc]
-#            positive_ref_logps = ref_log_ps + abs(ref_logp_min)+1   
-#            print 'Positive ref logps: ',positive_ref_logps
-            #sum_reference_logps = np.sum(positive_ref_logps)+ self.last_logp + abs(ref_logp_min)+1
-            all_log_ps = np.concatenate((log_ps, ref_log_ps))
-            min_all_log_ps_loc = np.argmin(all_log_ps)
-            all_log_p_min = all_log_ps[min_all_log_ps_loc]
-            positive_proposal_logps = log_ps + abs(all_log_p_min)+1
-            positive_reference_logps = ref_log_ps + abs(all_log_p_min)+1
-            sum_pos_proposal_logps = np.sum(positive_proposal_logps)
-            sum_reference_logps = np.sum(ref_log_ps)
-            sum_pos_reference_logps = np.sum(positive_reference_logps)
-            #print 'Sum reference logps: ',sum_reference_logps
-            #print 'Sum proposal logps: ',sum_proposal_logps
-            #print 'log pos ref logps: ',np.log10(sum_pos_reference_logps)
-            #print 'log pos prop logps: ',np.log10(sum_pos_proposal_logps)
-            #print 'ratio prop/ref: ',sum_proposal_logps - sum_reference_logps
-            #print 'ratio pos prop/pos ref: ',sum_pos_proposal_logps - sum_pos_reference_logps
-            #print 'ratio logp prop/logp ref: ',np.log10(sum_pos_proposal_logps) - np.log10(sum_pos_reference_logps)
-            q_new = metrop_select(sum_proposal_logps - sum_reference_logps, q_proposal, q0)
-            q_logp = log_ps[random_logp_loc]
-        elif run_snooker == True:
-            numerator = q_logp*(np.linalg.norm(q-z)**(self.total_var_dimension-1))
-            denominator = self.last_logp*(np.linalg.norm(q0-z)**(self.total_var_dimension-1))
-            q_new = metrop_select(numerator - denominator, q, q0)
-        else:    
-            q_new = metrop_select(q_logp - self.last_logp, q, q0)
+            if self.multitry > 1 and run_snooker == False:
+                np.append(ref_log_ps, self.last_logp)
+#               ref_logp_min_loc = np.argmin(ref_log_ps)
+#               ref_logp_min = ref_log_ps[ref_logp_min_loc]
+#               positive_ref_logps = ref_log_ps + abs(ref_logp_min)+1   
+#               print 'Positive ref logps: ',positive_ref_logps
+                #sum_reference_logps = np.sum(positive_ref_logps)+ self.last_logp + abs(ref_logp_min)+1
+                all_log_ps = np.concatenate((log_ps, ref_log_ps))
+                min_all_log_ps_loc = np.argmin(all_log_ps)
+                all_log_p_min = all_log_ps[min_all_log_ps_loc]
+                positive_proposal_logps = log_ps + abs(all_log_p_min)+1
+                positive_reference_logps = ref_log_ps + abs(all_log_p_min)+1
+                sum_pos_proposal_logps = np.sum(positive_proposal_logps)
+                sum_reference_logps = np.sum(ref_log_ps)
+                sum_pos_reference_logps = np.sum(positive_reference_logps)
+                #print 'Sum reference logps: ',sum_reference_logps
+                #print 'Sum proposal logps: ',sum_proposal_logps
+                #print 'log pos ref logps: ',np.log10(sum_pos_reference_logps)
+                #print 'log pos prop logps: ',np.log10(sum_pos_proposal_logps)
+                #print 'ratio prop/ref: ',sum_proposal_logps - sum_reference_logps
+                #print 'ratio pos prop/pos ref: ',sum_pos_proposal_logps - sum_pos_reference_logps
+                #print 'ratio logp prop/logp ref: ',np.log10(sum_pos_proposal_logps) - np.log10(sum_pos_reference_logps)
+                q_new = metrop_select(sum_proposal_logps - sum_reference_logps, q_proposal, q0)
+                q_logp = log_ps[random_logp_loc]
+            elif run_snooker == True:
+                numerator = q_logp*(np.linalg.norm(q-z)**(self.total_var_dimension-1))
+                denominator = self.last_logp*(np.linalg.norm(q0-z)**(self.total_var_dimension-1))
+                q_new = metrop_select(numerator - denominator, q, q0)
+            else:    
+                q_new = metrop_select(q_logp - self.last_logp, q, q0)
         
-        if np.array_equal(q0, q_new) and self.multitry > 1 and run_snooker == False:
-            print 'Did not accept point. Old logp: '+str(self.last_logp)+' Old sum logps: '+str(sum_reference_logps)+' Tested sum logps: '+str(sum_proposal_logps)+' Tested logp: '+str(q_logp)+' Logp ratio: ',sum_proposal_logps-sum_reference_logps
-        elif np.array_equal(q0, q_new) and run_snooker == True:
-            print 'Did not accept point. Old logp: '+str(self.last_logp)+' Old weighted logp '+str(denominator)+' Tested weighted logp: '+str(numerator)+' Tested logp: '+str(q_logp)
-        else:
-            print 'Accepted point. Old logp: ',str(self.last_logp)+' New logp: ',str(q_logp)
-            self.last_logp = q_logp
+            if np.array_equal(q0, q_new) and self.multitry > 1 and run_snooker == False:
+                print 'Did not accept point. Old logp: '+str(self.last_logp)+' Old sum logps: '+str(sum_reference_logps)+' Tested sum logps: '+str(sum_proposal_logps)+' Tested logp: '+str(q_logp)+' Logp ratio: ',sum_proposal_logps-sum_reference_logps
+            elif np.array_equal(q0, q_new) and run_snooker == True:
+                print 'Did not accept point. Old logp: '+str(self.last_logp)+' Old weighted logp '+str(denominator)+' Tested weighted logp: '+str(numerator)+' Tested logp: '+str(q_logp)
+            else:
+                print 'Accepted point. Old logp: ',str(self.last_logp)+' New logp: ',str(q_logp)
+                self.last_logp = q_logp
         
-        #Place new point in history
-        with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.current_positions.get_lock():
-            self.record_history(self.nseedchains, self.total_var_dimension, q_new, self.len_history)
+            #Place new point in history
+            with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.current_positions.get_lock():
+                self.record_history(self.nseedchains, self.total_var_dimension, q_new, self.len_history)
         
-        #If using multi-try DREAM, estimate ideal crossover probabilities for each dimension during burn-in.
-        #Don't do this for the first 10 iterations to give all chains a chance to fill in the shared current position array
-        if self.multitry > 1 and self.iter > 10 and self.iter < self.crossover_burnin:
-            with Dream_shared_vars.cross_probs.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.ncr_updates.get_lock() and Dream_shared_vars.current_positions.get_lock() and Dream_shared_vars.delta_m.get_lock():
-               self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, gamma, q0, q_new, CR)        
+            #If using multi-try DREAM, estimate ideal crossover probabilities for each dimension during burn-in.
+            #Don't do this for the first 10 iterations to give all chains a chance to fill in the shared current position array
+            if self.multitry > 1 and self.iter > 10 and self.iter < self.crossover_burnin:
+                with Dream_shared_vars.cross_probs.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.ncr_updates.get_lock() and Dream_shared_vars.current_positions.get_lock() and Dream_shared_vars.delta_m.get_lock():
+                    self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, gamma, q0, q_new, CR)        
         
-        self.iter += 1
+            self.iter += 1
+        except Exception as e:
+            traceback.print_exc()
+            print()
+            raise e
         return q_new
     
     def estimate_crossover_probabilities(self, iteration, ndim, gamma, q0, q_new, CR):
