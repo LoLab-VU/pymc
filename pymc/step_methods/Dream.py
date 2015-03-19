@@ -19,7 +19,7 @@ import traceback
 __all__ = ['Dream']
 
 class Dream(ArrayStep):
-    def __init__(self, variables=None, nseedchains=100, nCR = 3, crossover_burnin=1000, DEpairs=1, adaptationRate=.65, eps=10e-6, verbose=False, save_history = False, start_random=True, snooker=.10, multitry=False, model=None, **kwargs):
+    def __init__(self, variables=None, nseedchains=100, nCR = 3, crossover_burnin=1000, DEpairs=1, adaptationRate=.65, eps=10e-6, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, multitry=False, model=None, **kwargs):
         
         model = modelcontext(model)
                 
@@ -54,6 +54,7 @@ class Dream(ArrayStep):
         self.chain_n = None
         self.len_history = 0
         self.save_history = save_history
+        self.history_file = history_file
         self.start_random = start_random
         
         super(Dream, self).__init__(variables, [model.fastlogp], **kwargs)
@@ -65,22 +66,26 @@ class Dream(ArrayStep):
             try:
                 # Assuming the shared variables exist, seed the history with nseedchain draws from the prior
                 with Dream_shared_vars.history_seeded.get_lock():
-                    if Dream_shared_vars.history_seeded.value == 'F':
-                        print 'Seeding history with draws from prior'
-                        print self.nseedchains
-                        for i in range(self.nseedchains):
-                            start_loc = i*self.total_var_dimension
-                            end_loc = start_loc+self.total_var_dimension
-                            Dream_shared_vars.history[start_loc:end_loc] = self.draw_from_prior(self.model, self.variables)
-                            #print 'Adding draw: '+str(i)+ ' : '+str(Dream_shared_vars.history[start_loc:end_loc])
-                        #print 'Current history: '+str(Dream_shared_vars.history[0:1440])
-                        #np.save('history_at_start.npy', np.frombuffer(Dream_shared_vars.history.get_obj()))
-                        print 'Setting crossover probability starting values.'
-                        with Dream_shared_vars.cross_probs.get_lock():
-                            starting_cross_probs = np.array([1/(float(self.nCR)) for i in range(self.nCR)])
-                            Dream_shared_vars.cross_probs[0:self.nCR] = starting_cross_probs
-                            print 'set prob of different crossover values to: ',Dream_shared_vars.cross_probs[0:self.nCR+1]
-                    Dream_shared_vars.history_seeded.value = 'T'
+                    if self.history_file == False:
+                        print 'History file not loaded.'
+                        if Dream_shared_vars.history_seeded.value == 'F':
+                            print 'Seeding history with draws from prior'
+                            print self.nseedchains
+                            for i in range(self.nseedchains):
+                                start_loc = i*self.total_var_dimension
+                                end_loc = start_loc+self.total_var_dimension
+                                Dream_shared_vars.history[start_loc:end_loc] = self.draw_from_prior(self.model, self.variables)
+                                #print 'Adding draw: '+str(i)+ ' : '+str(Dream_shared_vars.history[start_loc:end_loc])
+                                #print 'Current history: '+str(Dream_shared_vars.history[0:1440])
+                                #np.save('history_at_start.npy', np.frombuffer(Dream_shared_vars.history.get_obj()))
+                    else:
+                        print 'History file loaded.'
+                    print 'Setting crossover probability starting values.'
+                    with Dream_shared_vars.cross_probs.get_lock():
+                        starting_cross_probs = np.array([1/(float(self.nCR)) for i in range(self.nCR)])
+                        Dream_shared_vars.cross_probs[0:self.nCR] = starting_cross_probs
+                        print 'set prob of different crossover values to: ',Dream_shared_vars.cross_probs[0:self.nCR+1]
+                        Dream_shared_vars.history_seeded.value = 'T'
                     if self.start_random:
                         print 'Setting start to random draw from prior.'
                         q0 = self.draw_from_prior(self.model, self.variables)
@@ -90,6 +95,7 @@ class Dream(ArrayStep):
                     with Dream_shared_vars.history.get_lock():
                         self.len_history = len(np.frombuffer(Dream_shared_vars.history.get_obj()))
                         print 'setting len history = ', self.len_history
+                    print 'History at start: ',str(Dream_shared_vars.history[0::])
             
             except AttributeError:
                 raise Exception('Dream should be run with multiple chains in parallel.  Set njobs > 1.')      
@@ -482,8 +488,8 @@ class Dream(ArrayStep):
             self.save_history_to_disc(np.frombuffer(Dream_shared_vars.history.get_obj()), date_time_str)
             
     def save_history_to_disc(self, history, prefix):
-        print 'saving history'
         filename = prefix+'DREAM_chain_history.npy'
+        print 'Saving history to file: ',filename
         np.save(filename, history)
     
 def call_logp(args):

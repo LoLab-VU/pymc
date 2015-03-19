@@ -213,9 +213,19 @@ def _mp_sample(njobs, args):
     #mp.log_to_stderr(logging.DEBUG)    
     if 'Dream' in str(args[0]):
        step_method = args[0][1]
-       arr_dim = (njobs*args[0][0]+step_method.nseedchains)*step_method.total_var_dimension
+       if step_method.history_file != False:
+           old_history = np.load(step_method.history_file)
+           print 'Old history loaded from file: ',old_history
+           len_old_history = len(old_history.flatten())
+           nold_history_records = len_old_history/step_method.total_var_dimension
+           step_method.nseedchains = nold_history_records
+           arr_dim = ((njobs*args[0][0])*step_method.total_var_dimension)+len_old_history
+       else:
+           arr_dim = (njobs*args[0][0]+step_method.nseedchains)*step_method.total_var_dimension
        current_position_dim = njobs*step_method.total_var_dimension
        history_arr = mp.Array('d', [0]*arr_dim)
+       if step_method.history_file != False:
+           history_arr[0:len_old_history] = old_history.flatten()
        current_position_arr = mp.Array('d', [0]*current_position_dim)
        nchains = mp.Value('i', njobs)
        nCR = step_method.nCR
