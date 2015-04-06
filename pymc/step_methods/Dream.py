@@ -19,7 +19,7 @@ import traceback
 __all__ = ['Dream']
 
 class Dream(ArrayStep):
-    def __init__(self, variables=None, nseedchains=None, nCR = 3, crossover_burnin=1000, DEpairs=1, adaptationRate=.65, lamb=.05, zeta=1e-12, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, appending_rate=10, multitry=False, model=None, **kwargs):
+    def __init__(self, variables=None, nseedchains=None, nCR = 3, crossover_burnin=1000, DEpairs=1, adaptationRate=.65, lamb=.05, zeta=1e-12, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, p_gamma_unity = .20, appending_rate=10, multitry=False, model=None, **kwargs):
         
         model = modelcontext(model)
                 
@@ -38,6 +38,7 @@ class Dream(ArrayStep):
         self.CR_values = np.array([m/float(self.nCR) for m in range(1, self.nCR+1)])
         self.DEpairs = DEpairs #This is delta in original Matlab code
         self.snooker = snooker
+        self.p_gamma_unity = p_gamma_unity #This is the probability of setting gamma=1
         self.appending_rate = appending_rate
         if multitry == False:
             self.multitry = 1
@@ -330,7 +331,9 @@ class Dream(ArrayStep):
         return cross_probs
          
     def set_gamma(self, iteration, DEpairs, ndimensions, snooker_choice, CR):
-        if iteration > 0 and iteration%5 == 0:
+        gamma_unity_choice = np.where(np.random.multinomial(1, [self.p_gamma_unity, 1-self.p_gamma_unity])==1)
+              
+        if iteration > 0 and gamma_unity_choice[0] == 0:
             gamma = np.array([1.0])
         
         elif iteration > 0 and snooker_choice == True:        
