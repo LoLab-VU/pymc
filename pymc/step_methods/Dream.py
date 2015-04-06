@@ -19,7 +19,7 @@ import traceback
 __all__ = ['Dream']
 
 class Dream(ArrayStep):
-    def __init__(self, variables=None, nseedchains=None, nCR = 3, crossover_burnin=1000, DEpairs=1, adaptationRate=.65, eps=10e-6, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, appending_rate=10, multitry=False, model=None, **kwargs):
+    def __init__(self, variables=None, nseedchains=None, nCR = 3, crossover_burnin=1000, DEpairs=1, adaptationRate=.65, lamb=.05, zeta=1e-12, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, appending_rate=10, multitry=False, model=None, **kwargs):
         
         model = modelcontext(model)
                 
@@ -45,7 +45,8 @@ class Dream(ArrayStep):
             self.multitry = 5
         else:
             self.multitry = multitry
-        self.eps = eps
+        self.lamb = lamb #This is e sub d in DREAM papers
+        self.zeta = zeta #This is epsilon in DREAM papers
         self.last_logp = None
         self.total_var_dimension = 0
         for var in variables:
@@ -377,9 +378,9 @@ class Dream(ArrayStep):
             else:
                 chain_differences = [sampled_history_pts[0]- sampled_history_pts[1] for i in range(len(sampled_history_pts))]
                 #print 'Generated chain differences with DEpairs=0.  chain differences = ',chain_differences
-            epsilon = np.array([np.random.normal(0, self.eps, self.total_var_dimension) for i in range(n_proposed_pts)])
-            e = np.array([np.random.uniform(-.05, .05, self.total_var_dimension) for i in range(n_proposed_pts)])
-            proposed_pts = q0 + e*gamma*chain_differences + epsilon
+            zeta = np.array([np.random.normal(0, self.zeta, self.total_var_dimension) for i in range(n_proposed_pts)])
+            e = np.array([np.random.uniform(-self.lamb, self.lamb, self.total_var_dimension) for i in range(n_proposed_pts)])
+            proposed_pts = q0 + e*gamma*chain_differences + zeta
             #print n_proposed_pts,' proposed pts generated without snooker update. Proposed pts = ',proposed_pts  
         
         else:
