@@ -212,6 +212,9 @@ def _mp_sample(njobs, args):
     # If using DREAM stepping method, allocate a shared history array, a count variable, and a variable denoting whether or not the history has been seeded with draws from the prior.
     #mp.log_to_stderr(logging.DEBUG)    
     if 'Dream' in str(args[0]):
+       min_njobs = (2*len(step_method.DEpairs))+1
+       if njobs < min_njobs:
+           raise Exception('Dream should be run with at least (2*DEpairs)+1 number of chains.  For current algorithmic settings, set njobs>=%s.' %str(min_njobs))
        step_method = args[0][1]
        if step_method.history_file != False:
            old_history = np.load(step_method.history_file)
