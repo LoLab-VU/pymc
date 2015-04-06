@@ -225,6 +225,9 @@ def _mp_sample(njobs, args):
            arr_dim = ((njobs*args[0][0])*step_method.total_var_dimension)+len_old_history
        else:
            arr_dim = (njobs*args[0][0]+step_method.nseedchains)*step_method.total_var_dimension
+       min_nseedchains = 2*len(step_method.DEpairs)*njobs
+       if step_method.nseedchains < min_nseedchains:
+           raise Exception('The size of the seeded starting history is insufficient.  Increase nseedchains>=%s.' %str(min_nseedchains))
        current_position_dim = njobs*step_method.total_var_dimension
        history_arr = mp.Array('d', [0]*arr_dim)
        if step_method.history_file != False:
