@@ -36,8 +36,8 @@ class Dream(ArrayStep):
         self.adapt_crossover = adapt_crossover
         self.crossover_burnin = crossover_burnin
         self.CR_probabilities = [1/float(self.nCR) for i in range(self.nCR)]
-        self.CR_values = np.array([m/float(self.nCR) for m in range(1, self.nCR+1)])
-        self.DEpairs = DEpairs #This is delta in original Matlab code
+        self.CR_values = np.array([m/float(self.nCR) for m in range(1, self.nCR+1)])        
+        self.DEpairs = np.linspace(1, self.DEpairs, num=self.DEpairs) #This is delta in original Matlab code
         self.snooker = snooker
         self.p_gamma_unity = p_gamma_unity #This is the probability of setting gamma=1
         self.appending_rate = appending_rate
@@ -56,7 +56,10 @@ class Dream(ArrayStep):
             self.total_var_dimension += var_name.dsize
         if self.nseedchains == None:
             self.nseedchains = self.total_var_dimension*10
-        
+        gamma_array = np.zeros((self.total_var_dimension, self.DEpairs))
+        for delta in range(1, self.DEpairs+1):
+            gamma_array[:,delta-1] = np.array([2.38 / np.sqrt(2*delta*np.linspace(1, self.total_var_dimension, num=self.total_var_dimension))])
+        self.gamma_arr = gamma_array
         self.iter = 0  
         self.chain_n = None
         self.len_history = 0
@@ -129,9 +132,14 @@ class Dream(ArrayStep):
                 CR = self.CR_values[CR_loc]
                 #print 'Set CR to: ',CR
             else:
-                CR = 1    
+                CR = 1 
+            
+            if len(self.DEpairs)>1:
+                DEpair_choice = np.random.randint(1, len(self.DEpairs)+1, size=1)
+            else:
+                DEpair_choice = 1
         
-            gamma = self.set_gamma(self.iter, self.DEpairs, self.total_var_dimension, run_snooker, CR)
+            gamma = self.set_gamma(self.iter, DEpair_choice, self.total_var_dimension, run_snooker, CR)
         
             with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
                 if self.snooker == 0 or run_snooker == False:
@@ -341,8 +349,9 @@ class Dream(ArrayStep):
             gamma = np.random.uniform(1.2, 2.2)
             
         else:
-            d_prime = ndimensions*CR
-            gamma = np.array([2.38 / np.sqrt( 2 * DEpairs  * d_prime)])
+            d_prime = np.floor(ndimensions*CR)
+            #gamma = np.array([2.38 / np.sqrt( 2 * DEpairs  * d_prime)])
+            gamma = self.gamma_arr[d_prime-1][DEpairs-1]
         
         return gamma
 
@@ -391,7 +400,7 @@ class Dream(ArrayStep):
             proposed_pts, z = self.snooker_update(n_proposed_pts, gamma, q0)
             #print n_proposed_pts,' proposed pts generated with snooker update. Proposed pts = ',proposed_pts
         
-        if self.multitry > 1 and snooker is False:
+        if self.adapt_crossover is True and snooker is False:
             #print 'points before crossover: ',proposed_pts
             if n_proposed_pts > 1:
                 #Perform crossover
