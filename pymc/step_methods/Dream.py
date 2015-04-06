@@ -19,7 +19,7 @@ import traceback
 __all__ = ['Dream']
 
 class Dream(ArrayStep):
-    def __init__(self, variables=None, nseedchains=None, nCR = 3, crossover_burnin=1000, DEpairs=1, adaptationRate=.65, lamb=.05, zeta=1e-12, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, p_gamma_unity = .20, appending_rate=10, multitry=False, model=None, **kwargs):
+    def __init__(self, variables=None, nseedchains=None, nCR = 3, adapt_crossover = True, crossover_burnin=1000, DEpairs=1, adaptationRate=.65, lamb=.05, zeta=1e-12, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, p_gamma_unity = .20, appending_rate=10, multitry=False, model=None, **kwargs):
         
         model = modelcontext(model)
                 
@@ -33,6 +33,7 @@ class Dream(ArrayStep):
         self.variables = variables
         self.nseedchains = nseedchains
         self.nCR = nCR
+        self.adapt_crossover = adapt_crossover
         self.crossover_burnin = crossover_burnin
         self.CR_probabilities = [1/float(self.nCR) for i in range(self.nCR)]
         self.CR_values = np.array([m/float(self.nCR) for m in range(1, self.nCR+1)])
@@ -121,7 +122,7 @@ class Dream(ArrayStep):
             else:
                 run_snooker = False
         
-            if self.multitry > 1:
+            if self.adapt_crossover == True:
                 #Set CR value for generating proposal point
                 CR_loc = np.where(np.random.multinomial(1, self.CR_probabilities)==1)
                 #print 'CR_loc chosen: ',CR_loc
