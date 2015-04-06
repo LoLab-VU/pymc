@@ -19,7 +19,7 @@ import traceback
 __all__ = ['Dream']
 
 class Dream(ArrayStep):
-    def __init__(self, variables=None, nseedchains=100, nCR = 3, crossover_burnin=1000, DEpairs=1, adaptationRate=.65, eps=10e-6, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, multitry=False, model=None, **kwargs):
+    def __init__(self, variables=None, nseedchains=None, nCR = 3, crossover_burnin=1000, DEpairs=1, adaptationRate=.65, eps=10e-6, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, appending_rate=10, multitry=False, model=None, **kwargs):
         
         model = modelcontext(model)
                 
@@ -36,10 +36,13 @@ class Dream(ArrayStep):
         self.crossover_burnin = crossover_burnin
         self.CR_probabilities = [1/float(self.nCR) for i in range(self.nCR)]
         self.CR_values = np.array([m/float(self.nCR) for m in range(1, self.nCR+1)])
-        self.DEpairs = DEpairs
+        self.DEpairs = DEpairs #This is delta in original Matlab code
         self.snooker = snooker
+        self.appending_rate = appending_rate
         if multitry == False:
             self.multitry = 1
+        elif multitry == True:
+            self.multitry = 5
         else:
             self.multitry = multitry
         self.eps = eps
@@ -48,7 +51,8 @@ class Dream(ArrayStep):
         for var in variables:
             var_name = getattr(model, str(var))
             self.total_var_dimension += var_name.dsize
-        print self.total_var_dimension
+        if self.nseedchains == None:
+            self.nseedchains = self.total_var_dimension*10
         
         self.iter = 0  
         self.chain_n = None
@@ -89,7 +93,7 @@ class Dream(ArrayStep):
                     if self.start_random:
                         print 'Setting start to random draw from prior.'
                         q0 = self.draw_from_prior(self.model, self.variables)
-                        print 'Start: ',q0
+                    print 'Start: ',q0
                 # Also get length of history array so we know when to save it at end of run.
                 if self.save_history:
                     with Dream_shared_vars.history.get_lock():
