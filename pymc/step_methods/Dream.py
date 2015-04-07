@@ -37,7 +37,7 @@ class Dream(ArrayStep):
         self.crossover_burnin = crossover_burnin
         self.CR_probabilities = [1/float(self.nCR) for i in range(self.nCR)]
         self.CR_values = np.array([m/float(self.nCR) for m in range(1, self.nCR+1)])        
-        self.DEpairs = np.linspace(1, self.DEpairs, num=self.DEpairs) #This is delta in original Matlab code
+        self.DEpairs = np.linspace(1, DEpairs, num=DEpairs) #This is delta in original Matlab code
         self.snooker = snooker
         self.p_gamma_unity = p_gamma_unity #This is the probability of setting gamma=1
         self.appending_rate = appending_rate
@@ -130,25 +130,24 @@ class Dream(ArrayStep):
                 CR_loc = np.where(np.random.multinomial(1, self.CR_probabilities)==1)
                 #print 'CR_loc chosen: ',CR_loc
                 CR = self.CR_values[CR_loc]
-                #print 'Set CR to: ',CR
+                print 'Set CR to: ',CR
             else:
                 CR = 1 
+            
             
             if len(self.DEpairs)>1:
                 DEpair_choice = np.random.randint(1, len(self.DEpairs)+1, size=1)
             else:
                 DEpair_choice = 1
         
-            gamma = self.set_gamma(self.iter, DEpair_choice, self.total_var_dimension, run_snooker, CR)
-        
             with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
                 if self.snooker == 0 or run_snooker == False:
                     #print 'Proposing pts with no snooker update. q0: ',q0,' CR: ',CR
-                    proposed_pts = self.generate_proposal_points(self.multitry, gamma, q0, CR, snooker=False)
+                    proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=False)
 
                 else:
                     #print 'Proposing pts with snooker update. q0: ',q0,' CR: ',CR
-                    proposed_pts, z = self.generate_proposal_points(1, gamma, q0, CR, snooker=True)
+                    proposed_pts, z = self.generate_proposal_points(1, q0, CR, DEpair_choice, snooker=True)
         
             if self.multitry == 1 or run_snooker == True:
                 q_logp = logp(np.squeeze(proposed_pts))
@@ -166,7 +165,7 @@ class Dream(ArrayStep):
                 #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
                 while np.all(np.isfinite(np.array(log_ps))==False):
                     print 'All logps infinite. Generating new proposal. Old logps: ',log_ps
-                    proposed_pts = self.generate_proposal_points(self.multitry, gamma, q0, CR, snooker=False)
+                    proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, snooker=False)
                     log_ps = []
                     for pt in np.squeeze(proposed_pts):
                         log_ps.append(logp(pt))
@@ -196,7 +195,7 @@ class Dream(ArrayStep):
             
                 #Draw reference points around the randomly selected proposal point
                 with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-                    reference_pts = self.generate_proposal_points(self.multitry-1, gamma, q_proposal, CR, snooker=False)
+                    reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, snooker=False)
                     #print 'Generated reference points: ',reference_pts
             
                 #Compute posterior density at reference points.
@@ -339,7 +338,7 @@ class Dream(ArrayStep):
         
         return cross_probs
          
-    def set_gamma(self, iteration, DEpairs, ndimensions, snooker_choice, CR):
+    def set_gamma(self, iteration, DEpairs, snooker_choice, CR, d_prime):
         gamma_unity_choice = np.where(np.random.multinomial(1, [self.p_gamma_unity, 1-self.p_gamma_unity])==1)
               
         if iteration > 0 and gamma_unity_choice[0] == 0:
@@ -349,7 +348,6 @@ class Dream(ArrayStep):
             gamma = np.random.uniform(1.2, 2.2)
             
         else:
-            d_prime = np.floor(ndimensions*CR)
             #gamma = np.array([2.38 / np.sqrt( 2 * DEpairs  * d_prime)])
             gamma = self.gamma_arr[d_prime-1][DEpairs-1]
         
@@ -380,53 +378,37 @@ class Dream(ArrayStep):
         #print 'sampled chains: ', sampled_chains
         return sampled_chains
         
-    def generate_proposal_points(self, n_proposed_pts, gamma, q0, CR, snooker):
+    def generate_proposal_points(self, n_proposed_pts, q0, CR, DEpairs, snooker):
         if snooker is False:
             #print 'Generating pts with no snooker update. n proposed pts= ',n_proposed_pts
-            sampled_history_pts = np.array([self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension) for i in range(n_proposed_pts)])
-            #print 'Sampled history pts: ',sampled_history_pts            
-            if self.DEpairs != 0:
-                chain_differences = [np.sum(sampled_history_pts[i][0:2*self.DEpairs], axis=0)-np.sum(sampled_history_pts[i][2*self.DEpairs:self.DEpairs*4], axis=0) for i in range(len(sampled_history_pts))]
-                #print 'Generated chain differences with DEpairs>0.  chain differences = ',chain_differences
-            else:
-                chain_differences = [sampled_history_pts[0]- sampled_history_pts[1] for i in range(len(sampled_history_pts))]
-                #print 'Generated chain differences with DEpairs=0.  chain differences = ',chain_differences
+            sampled_history_pts = np.array([self.sample_from_history(self.nseedchains, DEpairs, self.total_var_dimension) for i in range(n_proposed_pts)])
+            print 'history shape: ',sampled_history_pts.shape           
+            chain_differences = np.array([np.sum(sampled_history_pts[i][0:2*DEpairs], axis=0)-np.sum(sampled_history_pts[i][2*DEpairs:DEpairs*4], axis=0) for i in range(len(sampled_history_pts))])
+            print 'chain_differences_shape: ',chain_differences.shape            
+            #print 'Generated chain differences with DEpairs>0.  chain differences = ',chain_differences
             zeta = np.array([np.random.normal(0, self.zeta, self.total_var_dimension) for i in range(n_proposed_pts)])
             e = np.array([np.random.uniform(-self.lamb, self.lamb, self.total_var_dimension) for i in range(n_proposed_pts)])
+            d_prime = self.total_var_dimension
+            if self.adapt_crossover is True:
+                U = np.random.uniform(0, 1, size=chain_differences.shape)
+                d_prime = len(U[np.where(U<CR)])
+                print 'd_prime: ',d_prime
+            gamma = self.set_gamma(self.iter, DEpairs, snooker, CR, d_prime)
+             
             proposed_pts = q0 + e*gamma*chain_differences + zeta
+            print 'proposed points: ',proposed_pts
+            if self.adapt_crossover is True and d_prime != self.total_var_dimension:
+                if n_proposed_pts > 1:
+                    for point in proposed_pts:
+                        point[np.where(U>CR)] = q0[np.where(U>CR)[1]]
+                else:
+                    proposed_pts[np.where(U>CR)] = q0[np.where(U>CR)[1]]
             #print n_proposed_pts,' proposed pts generated without snooker update. Proposed pts = ',proposed_pts  
         
         else:
             proposed_pts, z = self.snooker_update(n_proposed_pts, gamma, q0)
             #print n_proposed_pts,' proposed pts generated with snooker update. Proposed pts = ',proposed_pts
         
-        if self.adapt_crossover is True and snooker is False:
-            #print 'points before crossover: ',proposed_pts
-            if n_proposed_pts > 1:
-                #Perform crossover
-                for point in proposed_pts:
-                    for d in range(len(point)):
-                        U = np.random.uniform(0, 1)
-                        #print 'U: ',U,' CR: ',CR
-                        if U <= 1-CR:
-                            #print 'Changed dimension: ',d,' to original'
-                            point[d] = q0[d]
-            else:
-               #Perform crossover
-                #print 'proposed pt[0]: ',proposed_pts[0]
-                #print 'squeezed proposed_pt[0]: ',np.squeeze(proposed_pts[0])
-                #print 'q0[0]: ',q0[0]
-                #print 'q0: ',q0
-                #print 'proposed pt[0][0]: ',proposed_pts[0][0]
-                #print 'proposed_pt[0][1]: ',proposed_pts[0][1]
-                for d in range(len(proposed_pts[0])):
-                    U = np.random.uniform(0, 1)
-                    #print 'U: ',U,' CR: ',CR
-                    if U <= 1-CR:
-                        #print 'Changed dimension: ',d,' to original'
-                        proposed_pts[0][d] = q0[d] 
-                        
-        #print 'points after crossover: ',proposed_pts
         if snooker is False:
             return proposed_pts
         else:
