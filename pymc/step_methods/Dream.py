@@ -263,7 +263,11 @@ class Dream(ArrayStep):
             #Don't count iterations where gamma was set to 1 in crossover adaptation calculations
             if self.adapt_crossover > 1 and self.iter > 10 and self.iter < self.crossover_burnin and self.gamma != 1.0:
                 with Dream_shared_vars.cross_probs.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.ncr_updates.get_lock() and Dream_shared_vars.current_positions.get_lock() and Dream_shared_vars.delta_m.get_lock():
-                    self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, gamma, q0, q_new, CR)        
+                    #If a snooker update was run, then regardless of the originally selected CR, a CR=1.0 was used.
+                    if run_snooker is False:
+                        self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, gamma, q0, q_new, CR) 
+                    else:
+                        self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, gamma, q0, q_new, CR=1) 
         
             self.iter += 1
         except Exception as e:
@@ -437,31 +441,6 @@ class Dream(ArrayStep):
         dx = self.gamma*zP
         proposed_pts = [q0 + dx[point] for point in range(n_proposed_pts)]
         print 'proposed points: ',proposed_pts
-#        #Find mutually orthogonal vectors spanning current location and a randomly chosen chain from history
-#        ortho_vecs = []
-#        if n_proposed_pts == 1:
-#           vecs, r = np.linalg.qr(np.column_stack((q0, np.squeeze(sampled_history_pt))))
-#           ortho_vecs.append(vecs) 
-#        else:
-#            for i in range(n_proposed_pts):        
-#                vecs, r = np.linalg.qr(np.column_stack((q0, np.squeeze(sampled_history_pt)[i])))
-#                ortho_vecs.append(vecs)
-#
-#        #Determine orthogonal projection of two other randomly chosen chains onto this span
-#        
-#        projected_pts = []
-#        for vec_set in range(len(ortho_vecs)):
-#            pts_for_set = []
-#            for chain_n in range(2):
-#                ortho_vec_list = [ortho_vecs[vec_set][:,0], ortho_vecs[vec_set][:,1]]
-#                pts_for_set.append([self.project_chains(ortho_vec_list, chains_to_be_projected[vec_set][chain_n])])
-#            projected_pts.append(pts_for_set)
-#        
-#        #Calculate difference between projected points
-#        chain_differences = np.array([np.array(projected_pts[i][0]) - np.array(projected_pts[i][1]) for i in range(n_proposed_pts)])
-        
-        #And use difference to propose a new point
-        #proposed_pts = q0 + gamma*chain_differences
         
         return proposed_pts, sampled_history_pt
     
