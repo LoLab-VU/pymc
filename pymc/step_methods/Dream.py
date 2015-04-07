@@ -148,9 +148,9 @@ class Dream(ArrayStep):
 
                 else:
                     #print 'Proposing pts with snooker update. q0: ',q0,' CR: ',CR
-                    proposed_pts, z = self.generate_proposal_points(1, q0, CR, DEpair_choice, snooker=True)
+                    proposed_pts, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)
         
-            if self.multitry == 1 or run_snooker == True:
+            if self.multitry == 1:
                 q_logp = logp(np.squeeze(proposed_pts))
                 q = np.squeeze(proposed_pts)
             else:
@@ -166,7 +166,7 @@ class Dream(ArrayStep):
                 #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
                 while np.all(np.isfinite(np.array(log_ps))==False):
                     print 'All logps infinite. Generating new proposal. Old logps: ',log_ps
-                    proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, snooker=False)
+                    proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, snooker=run_snooker)
                     log_ps = []
                     for pt in np.squeeze(proposed_pts):
                         log_ps.append(logp(pt))
@@ -196,7 +196,7 @@ class Dream(ArrayStep):
             
                 #Draw reference points around the randomly selected proposal point
                 with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-                    reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, snooker=False)
+                    reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, snooker=run_snooker)
                     #print 'Generated reference points: ',reference_pts
             
                 #Compute posterior density at reference points.
@@ -342,13 +342,13 @@ class Dream(ArrayStep):
          
     def set_gamma(self, iteration, DEpairs, snooker_choice, CR, d_prime):
         gamma_unity_choice = np.where(np.random.multinomial(1, [self.p_gamma_unity, 1-self.p_gamma_unity])==1)
-              
-        if iteration > 0 and gamma_unity_choice[0] == 0:
-            gamma = np.array([1.0])
         
-        elif iteration > 0 and snooker_choice == True:        
+        if snooker_choice == True:
             gamma = np.random.uniform(1.2, 2.2)
             
+        elif gamma_unity_choice[0] == 0:
+            gamma = np.array([1.0])
+        
         else:
             #gamma = np.array([2.38 / np.sqrt( 2 * DEpairs  * d_prime)])
             gamma = self.gamma_arr[d_prime-1][DEpairs-1]
@@ -408,7 +408,8 @@ class Dream(ArrayStep):
             #print n_proposed_pts,' proposed pts generated without snooker update. Proposed pts = ',proposed_pts  
         
         else:
-            proposed_pts, z = self.snooker_update(n_proposed_pts, gamma, q0)
+            self.gamma = self.set_gamma(self.iter, DEpairs, snooker, CR, self.total_var_dimension)
+            proposed_pts, z = self.snooker_update(n_proposed_pts, q0)
             #print n_proposed_pts,' proposed pts generated with snooker update. Proposed pts = ',proposed_pts
         
         if snooker is False:
@@ -416,35 +417,51 @@ class Dream(ArrayStep):
         else:
             return proposed_pts, z
         
-    def snooker_update(self, n_proposed_pts, gamma, q0):
+    def snooker_update(self, n_proposed_pts, q0):
         print 'iteration: ',self.iter,' running snooker update'
         sampled_history_pt = [self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension, snooker=True) for i in range(n_proposed_pts)]
-
-        #Find mutually orthogonal vectors spanning current location and a randomly chosen chain from history
-        ortho_vecs = []
-        if n_proposed_pts == 1:
-           vecs, r = np.linalg.qr(np.column_stack((q0, np.squeeze(sampled_history_pt))))
-           ortho_vecs.append(vecs) 
-        else:
-            for i in range(n_proposed_pts):        
-                vecs, r = np.linalg.qr(np.column_stack((q0, np.squeeze(sampled_history_pt)[i])))
-                ortho_vecs.append(vecs)
-
-        #Determine orthogonal projection of two other randomly chosen chains onto this span
+        print 'sampled history point: ',sampled_history_pt
         chains_to_be_projected = np.squeeze([np.array([self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension, snooker=True) for i in range(2)]) for x in range(n_proposed_pts)])
-        projected_pts = []
-        for vec_set in range(len(ortho_vecs)):
-            pts_for_set = []
-            for chain_n in range(2):
-                ortho_vec_list = [ortho_vecs[vec_set][:,0], ortho_vecs[vec_set][:,1]]
-                pts_for_set.append([self.project_chains(ortho_vec_list, chains_to_be_projected[vec_set][chain_n])])
-            projected_pts.append(pts_for_set)
-        
-        #Calculate difference between projected points
-        chain_differences = np.array([np.array(projected_pts[i][0]) - np.array(projected_pts[i][1]) for i in range(n_proposed_pts)])
+        print 'chains to be projected shape: ',chains_to_be_projected.shape        
+        #Define projection vector
+        proj_vec_diff = np.squeeze(q0-sampled_history_pt)
+        print 'proj vec diff: ',proj_vec_diff
+        D = [np.dot(proj_vec_diff[point], proj_vec_diff[point]) for point in range(len(proj_vec_diff))]
+        print 'D: ',D
+        #Orthogonal projection of chains_to_projected onto projection vector  
+        diff_chains_to_be_projected = [(chains_to_be_projected[point][0]-chains_to_be_projected[point][1]) for point in range(n_proposed_pts)]
+        print 'diff chains to be projected: ',diff_chains_to_be_projected
+        zP = np.array([np.dot(diff_chains_to_be_projected[point], proj_vec_diff[point])/D[point] for point in range(n_proposed_pts)])
+        print 'zP: ',zP
+        print 'gamma: ',self.gamma
+        dx = self.gamma*zP
+        proposed_pts = [q0 + dx[point] for point in range(n_proposed_pts)]
+        print 'proposed points: ',proposed_pts
+#        #Find mutually orthogonal vectors spanning current location and a randomly chosen chain from history
+#        ortho_vecs = []
+#        if n_proposed_pts == 1:
+#           vecs, r = np.linalg.qr(np.column_stack((q0, np.squeeze(sampled_history_pt))))
+#           ortho_vecs.append(vecs) 
+#        else:
+#            for i in range(n_proposed_pts):        
+#                vecs, r = np.linalg.qr(np.column_stack((q0, np.squeeze(sampled_history_pt)[i])))
+#                ortho_vecs.append(vecs)
+#
+#        #Determine orthogonal projection of two other randomly chosen chains onto this span
+#        
+#        projected_pts = []
+#        for vec_set in range(len(ortho_vecs)):
+#            pts_for_set = []
+#            for chain_n in range(2):
+#                ortho_vec_list = [ortho_vecs[vec_set][:,0], ortho_vecs[vec_set][:,1]]
+#                pts_for_set.append([self.project_chains(ortho_vec_list, chains_to_be_projected[vec_set][chain_n])])
+#            projected_pts.append(pts_for_set)
+#        
+#        #Calculate difference between projected points
+#        chain_differences = np.array([np.array(projected_pts[i][0]) - np.array(projected_pts[i][1]) for i in range(n_proposed_pts)])
         
         #And use difference to propose a new point
-        proposed_pts = q0 + gamma*chain_differences
+        #proposed_pts = q0 + gamma*chain_differences
         
         return proposed_pts, sampled_history_pt
     
