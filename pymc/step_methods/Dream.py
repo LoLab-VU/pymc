@@ -39,6 +39,7 @@ class Dream(ArrayStep):
         self.CR_values = np.array([m/float(self.nCR) for m in range(1, self.nCR+1)])        
         self.DEpairs = np.linspace(1, DEpairs, num=DEpairs) #This is delta in original Matlab code
         self.snooker = snooker
+        self.gamma = None
         self.p_gamma_unity = p_gamma_unity #This is the probability of setting gamma=1
         self.appending_rate = appending_rate
         if multitry == False:
@@ -259,7 +260,8 @@ class Dream(ArrayStep):
         
             #If using multi-try DREAM, estimate ideal crossover probabilities for each dimension during burn-in.
             #Don't do this for the first 10 iterations to give all chains a chance to fill in the shared current position array
-            if self.multitry > 1 and self.iter > 10 and self.iter < self.crossover_burnin:
+            #Don't count iterations where gamma was set to 1 in crossover adaptation calculations
+            if self.adapt_crossover > 1 and self.iter > 10 and self.iter < self.crossover_burnin and self.gamma != 1.0:
                 with Dream_shared_vars.cross_probs.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.ncr_updates.get_lock() and Dream_shared_vars.current_positions.get_lock() and Dream_shared_vars.delta_m.get_lock():
                     self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, gamma, q0, q_new, CR)        
         
@@ -393,7 +395,7 @@ class Dream(ArrayStep):
                 U = np.random.uniform(0, 1, size=chain_differences.shape)
                 d_prime = len(U[np.where(U<CR)])
                 print 'd_prime: ',d_prime
-            gamma = self.set_gamma(self.iter, DEpairs, snooker, CR, d_prime)
+            self.gamma = self.set_gamma(self.iter, DEpairs, snooker, CR, d_prime)
              
             proposed_pts = q0 + e*gamma*chain_differences + zeta
             print 'proposed points: ',proposed_pts
