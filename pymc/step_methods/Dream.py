@@ -148,7 +148,7 @@ class Dream(ArrayStep):
 
                 else:
                     #print 'Proposing pts with snooker update. q0: ',q0,' CR: ',CR
-                    proposed_pts, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)
+                    proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)
         
             if self.multitry == 1:
                 q_logp = logp(np.squeeze(proposed_pts))
@@ -166,7 +166,10 @@ class Dream(ArrayStep):
                 #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
                 while np.all(np.isfinite(np.array(log_ps))==False):
                     print 'All logps infinite. Generating new proposal. Old logps: ',log_ps
-                    proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
+                    if run_snooker is True:
+                        proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
+                    else:
+                        proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
                     log_ps = []
                     for pt in np.squeeze(proposed_pts):
                         log_ps.append(logp(pt))
@@ -187,28 +190,13 @@ class Dream(ArrayStep):
                 best_logp_loc = np.where(np.random.multinomial(1, logp_prob)==1)[0]
                 q_proposal = np.squeeze(proposed_pts[best_logp_loc])
                 print 'logps proposed = '+str(log_ps)+' Selected logp = '+str(log_ps[best_logp_loc])+' Point = '+str(q_proposal)
-#                logp_finite = np.isfinite(log_ps)
-#                q_logp_min_loc = np.argmin(log_ps[logp_finite])
-#                q_logp_min = log_ps[logp_finite][q_logp_min_loc]
-#                positive_logps = log_ps[logp_finite] + abs(q_logp_min)+1
-#                
-#                print 'logps: ',log_ps
-#                print 'positive logps: ',positive_logps
-#                sum_proposal_logps = np.sum(log_ps[logp_finite])
-#                sum_positive_proposal_logps = np.sum(positive_logps)
-#                logp_draw_prob = abs(positive_logps/sum_positive_proposal_logps)
-#                print 'logp draw prob: ',logp_draw_prob
-#                random_logp_loc = np.where(np.random.multinomial(1, logp_draw_prob)==1)[0]
-#                print 'logp location: ',random_logp_loc
-#                print 'proposed points: ',proposed_pts
-#                print 'random_logp_loc: ',random_logp_loc
-#                q_proposal = np.squeeze(proposed_pts[logp_finite][random_logp_loc])
-#                print 'q_proposal: ',q_proposal
-                #print 'logps proposed = '+str(log_ps)+' Selected logp = '+str(log_ps[random_logp_loc])+' Point = '+str(q_proposal)
             
                 #Draw reference points around the randomly selected proposal point
                 with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-                    reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
+                    if run_snooker is True:
+                        reference_pts, snooker_logp_ref = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
+                    else:
+                        reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
                     #print 'Generated reference points: ',reference_pts
             
                 #Compute posterior density at reference points.
@@ -230,40 +218,57 @@ class Dream(ArrayStep):
             if self.last_logp == None:
                 self.last_logp = logp(q0)
         
-            if self.multitry > 1 and run_snooker == False:
+            if self.multitry > 1:
                 np.append(ref_log_ps, self.last_logp)
                 ref_log_ps = np.array(ref_log_ps)
-                ref_logp_finite = np.isfinite(ref_log_ps)
-#               ref_logp_min_loc = np.argmin(ref_log_ps)
-#               ref_logp_min = ref_log_ps[ref_logp_min_loc]
-#               positive_ref_logps = ref_log_ps + abs(ref_logp_min)+1   
-#               print 'Positive ref logps: ',positive_ref_logps
-                #sum_reference_logps = np.sum(positive_ref_logps)+ self.last_logp + abs(ref_logp_min)+1
-                sum_reference_logps = np.sum(ref_log_ps[ref_logp_finite])
-                #print 'Sum reference logps: ',sum_reference_logps
-                #print 'Sum proposal logps: ',sum_proposal_logps
-                #print 'log pos ref logps: ',np.log10(sum_pos_reference_logps)
-                #print 'log pos prop logps: ',np.log10(sum_pos_proposal_logps)
-                #print 'ratio prop/ref: ',sum_proposal_logps - sum_reference_logps
-                #print 'ratio pos prop/pos ref: ',sum_pos_proposal_logps - sum_pos_reference_logps
-                #print 'ratio logp prop/logp ref: ',np.log10(sum_pos_proposal_logps) - np.log10(sum_pos_reference_logps)
-                q_new = metrop_select(sum_proposal_logps - sum_reference_logps, q_proposal, q0)
-                q_logp = log_ps[best_logp_loc]
-            elif run_snooker == True:
-                numerator = np.log(np.linalg.norm(q-z))*(self.total_var_dimension-1)
-                denominator = self.last_logp*(np.linalg.norm(q0-z)**(self.total_var_dimension-1))
-                q_new = metrop_select(numerator - denominator, q, q0)
-            else:    
-                q_new = metrop_select(q_logp - self.last_logp, q, q0)        
+
+                if run_snooker is True:
+                    total_proposal_logp = log_ps + snooker_logp_prop
+                    #Goal is to determine the ratio =  p(y) * p(y --> X) / p(Xref) * p(Xref --> X) where y = proposal point, X = current point, and Xref = reference point
+                    # First determine p(y --> X) (i.e. moving from proposed point y to original point X)
+                    # p(y --> X) equals ||y - z||^(n-1), i.e. the snooker_logp for the proposed point
+                    # p(Xref --> X) is equal to p(Xref --> y) * p(y --> X) (i.e. moving from Xref to proposed point y to original point X)
+                    total_reference_logp = ref_log_ps + snooker_logp_ref + snooker_logp_prop
                 
-            if np.array_equal(q0, q_new) and self.multitry > 1 and run_snooker == False:
-                print 'Did not accept point. Old logp: '+str(self.last_logp)+' Old sum logps: '+str(sum_reference_logps)+' Tested sum logps: '+str(sum_proposal_logps)+' Tested logp: '+str(q_logp)+' Logp ratio: ',sum_proposal_logps-sum_reference_logps
+                else:
+                    total_proposal_logp = log_ps
+                    print 'total proposal logp: ',total_proposal_logp
+                    total_reference_logp = ref_log_ps
+                    print 'total reference logp: ',total_reference_logp
+                
+                #Determine max logp for all proposed and reference points
+                max_logp = np.amax(np.concatenate((total_proposal_logp, total_reference_logp)))
+                
+                #Calculate weights for proposed points
+                weight_proposed = np.amax(np.exp(total_proposal_logp - max_logp))
+                weight_reference = np.amax(np.exp(total_reference_logp - max_logp))
+                
+                q_new = metrop_select(weight_proposed - weight_reference, q_proposal, q0)
+                q_logp = logp(q_proposal)   
+            else:  
+                if run_snooker is True:
+                    total_proposed_logp = q_logp + snooker_logp_prop
+                    snooker_current_logp = np.log(np.linalg.norm(q0-z))*(self.total_var_dimension-1)
+                    total_old_logp = self.last_logp + snooker_current_logp
+                    
+                    q_new = metrop_select(total_proposed_logp - total_old_logp, q, q0)
+                else:
+                    q_new = metrop_select(q_logp - self.last_logp, q, q0)        
+                
+            if np.array_equal(q0, q_new) and self.multitry > 1:
+                print 'Did not accept point. Old logp: '+str(self.last_logp)+' Old weighted logps: '+str(weight_reference)+' Tested weighted logps: '+str(weight_proposed)+' Tested logp: '+str(q_logp)+' Logp ratio: ',weight_proposed - weight_reference
             elif np.array_equal(q0, q_new) and run_snooker == True:
-                print 'Did not accept point. Old logp: '+str(self.last_logp)+' Old weighted logp '+str(denominator)+' Tested weighted logp: '+str(numerator)+' Tested logp: '+str(q_logp)
+                print 'Did not accept point. Old logp: '+str(self.last_logp)+' Old weighted logp '+str(total_old_logp)+' Tested weighted logp: '+str(total_proposed_logp)+' Tested logp: '+str(q_logp)
             elif np.array_equal(q0, q_new) and run_snooker == False:
                 print 'Did not accept point. Old logp: ',str(self.last_logp)+' New logp: ',str(q_logp)
             else:
-                print 'Accepted point. Old logp: ',str(self.last_logp)+' New logp: ',str(q_logp)
+                if self.multitry > 1:
+                    print 'Accepted point.  Old weighted logps: '+str(weight_reference)+' Tested weighted logps: '+str(weight_proposed)+' Old logp: '+str(self.last_logp)+' Tested logp: '+str(q_logp)
+                elif run_snooker == True:
+                    print 'Accepted point.  Old weighted logp: '+str(total_old_logp)+' Tested weighted logp: '+str(total_proposed_logp)+' Old logp: ',self.last_logp+' Tested logp: '+str(q_logp)
+                else:
+                    print 'Accepted point. Old logp: '+str(self.last_logp)+' New logp: '+str(q_logp)
+                    
                 self.last_logp = q_logp
         
             #Place new point in history
@@ -435,13 +440,13 @@ class Dream(ArrayStep):
         
         else:
             self.gamma = self.set_gamma(self.iter, DEpairs, snooker, CR, self.total_var_dimension)
-            proposed_pts, z = self.snooker_update(n_proposed_pts, q0)
+            proposed_pts, snooker_logp, z = self.snooker_update(n_proposed_pts, q0)
             #print n_proposed_pts,' proposed pts generated with snooker update. Proposed pts = ',proposed_pts
         
         if snooker is False:
             return proposed_pts
         else:
-            return proposed_pts, z
+            return proposed_pts, snooker_logp, z
         
     def snooker_update(self, n_proposed_pts, q0):
         print 'iteration: ',self.iter,' running snooker update'
@@ -460,6 +465,7 @@ class Dream(ArrayStep):
             zP = np.nan_to_num(np.array([np.dot(diff_chains_to_be_projected[point], proj_vec_diff[point])/D[point] for point in range(n_proposed_pts)]))
             dx = self.gamma*zP
             proposed_pts = [q0 + dx[point] for point in range(n_proposed_pts)]
+            snooker_logp = [np.log(np.linalg.norm(proposed_pts[point]-sampled_history_pt[point]))*(self.total_var_dimension-1) for point in range(n_proposed_pts)]
         else:
             D = np.dot(proj_vec_diff, proj_vec_diff)
 
@@ -468,6 +474,7 @@ class Dream(ArrayStep):
             zP = np.nan_to_num(np.array([np.dot(diff_chains_to_be_projected, proj_vec_diff)/D]))
             dx = self.gamma*zP
             proposed_pts = q0 + dx
+            snooker_logp = np.log(np.linalg.norm(proposed_pts-sampled_history_pt))*(self.total_var_dimension-1)
             
         print 'D: ',D
         print 'diff chains to be projected: ',diff_chains_to_be_projected
@@ -477,7 +484,7 @@ class Dream(ArrayStep):
         
         print 'proposed points: ',proposed_pts
         
-        return proposed_pts, sampled_history_pt
+        return proposed_pts, snooker_logp, sampled_history_pt
     
     def project_chains(self, ortho_vecs, chain_to_be_projected):
         sigmadict = {len(ortho_vecs):1}
