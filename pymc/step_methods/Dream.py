@@ -238,7 +238,7 @@ class Dream(ArrayStep):
                 q_new = metrop_select(sum_proposal_logps - sum_reference_logps, q_proposal, q0)
                 q_logp = log_ps[logp_finite][random_logp_loc]
             elif run_snooker == True:
-                numerator = q_logp*(np.linalg.norm(q-z)**(self.total_var_dimension-1))
+                numerator = np.log(np.linalg.norm(q-z))*(self.total_var_dimension-1)
                 denominator = self.last_logp*(np.linalg.norm(q0-z)**(self.total_var_dimension-1))
                 q_new = metrop_select(numerator - denominator, q, q0)
             else:    
@@ -430,16 +430,29 @@ class Dream(ArrayStep):
         #Define projection vector
         proj_vec_diff = np.squeeze(q0-sampled_history_pt)
         print 'proj vec diff: ',proj_vec_diff
-        D = [np.dot(proj_vec_diff[point], proj_vec_diff[point]) for point in range(len(proj_vec_diff))]
+        if n_proposed_pts > 1:
+            D = [np.dot(proj_vec_diff[point], proj_vec_diff[point]) for point in range(len(proj_vec_diff))]
+            
+            #Orthogonal projection of chains_to_projected onto projection vector
+            diff_chains_to_be_projected = [(chains_to_be_projected[point][0]-chains_to_be_projected[point][1]) for point in range(n_proposed_pts)]
+            zP = np.nan_to_num(np.array([np.dot(diff_chains_to_be_projected[point], proj_vec_diff[point])/D[point] for point in range(n_proposed_pts)]))
+            dx = self.gamma*zP
+            proposed_pts = [q0 + dx[point] for point in range(n_proposed_pts)]
+        else:
+            D = np.dot(proj_vec_diff, proj_vec_diff)
+
+            #Orthogonal projection of chains_to_projected onto projection vector  
+            diff_chains_to_be_projected = chains_to_be_projected[0]-chains_to_be_projected[1]
+            zP = np.nan_to_num(np.array([np.dot(diff_chains_to_be_projected, proj_vec_diff)/D]))
+            dx = self.gamma*zP
+            proposed_pts = q0 + dx
+            
         print 'D: ',D
-        #Orthogonal projection of chains_to_projected onto projection vector  
-        diff_chains_to_be_projected = [(chains_to_be_projected[point][0]-chains_to_be_projected[point][1]) for point in range(n_proposed_pts)]
         print 'diff chains to be projected: ',diff_chains_to_be_projected
-        zP = np.array([np.dot(diff_chains_to_be_projected[point], proj_vec_diff[point])/D[point] for point in range(n_proposed_pts)])
         print 'zP: ',zP
         print 'gamma: ',self.gamma
-        dx = self.gamma*zP
-        proposed_pts = [q0 + dx[point] for point in range(n_proposed_pts)]
+
+        
         print 'proposed points: ',proposed_pts
         
         return proposed_pts, sampled_history_pt
