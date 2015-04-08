@@ -240,6 +240,8 @@ def _mp_sample(njobs, args):
        delta_m = mp.Array('d', [0]*nCR)
        n = mp.Value('i', 0)
        tf = mp.Value('c', 'F')
+       if step_method.crossover_burnin == None:
+           step_method.crossover_burnin = int(np.floor(args[0][0]/10))
        print 'Launching jobs'
        p = DreamPool(njobs, initializer=mp_dream_init, initargs=(history_arr, current_position_arr, nchains, crossover_probabilities, ncrossover_updates, delta_m, n, tf, ))
     else:

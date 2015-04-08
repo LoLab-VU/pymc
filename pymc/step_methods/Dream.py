@@ -19,7 +19,7 @@ import traceback
 __all__ = ['Dream']
 
 class Dream(ArrayStep):
-    def __init__(self, variables=None, nseedchains=None, nCR = 3, adapt_crossover = True, crossover_burnin=1000, DEpairs=1, adaptationRate=.65, lamb=.05, zeta=1e-12, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, p_gamma_unity = .20, appending_rate=10, multitry=False, model=None, **kwargs):
+    def __init__(self, variables=None, nseedchains=None, nCR = 3, adapt_crossover = True, crossover_burnin=None, DEpairs=1, adaptationRate=.65, lamb=.05, zeta=1e-12, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, p_gamma_unity = .20, appending_rate=10, multitry=False, model=None, **kwargs):
         
         model = modelcontext(model)
                 
@@ -74,6 +74,7 @@ class Dream(ArrayStep):
         # On first iteration, check that shared variables have been initialized (which only occurs if multiple chains have been started).
         if self.iter == 0:   
             print 'Dream has started'
+
             try:
                 # Assuming the shared variables exist, seed the history with nseedchain draws from the prior
                 with Dream_shared_vars.history_seeded.get_lock():
@@ -278,13 +279,13 @@ class Dream(ArrayStep):
             #If using multi-try DREAM, estimate ideal crossover probabilities for each dimension during burn-in.
             #Don't do this for the first 10 iterations to give all chains a chance to fill in the shared current position array
             #Don't count iterations where gamma was set to 1 in crossover adaptation calculations
-            if self.adapt_crossover > 1 and self.iter > 10 and self.iter < self.crossover_burnin and self.gamma != 1.0:
+            if self.adapt_crossover is True and self.iter > 10 and self.iter < self.crossover_burnin and np.any(np.array(self.gamma)==1.0) != True:
                 with Dream_shared_vars.cross_probs.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.ncr_updates.get_lock() and Dream_shared_vars.current_positions.get_lock() and Dream_shared_vars.delta_m.get_lock():
                     #If a snooker update was run, then regardless of the originally selected CR, a CR=1.0 was used.
                     if run_snooker is False:
-                        self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, gamma, q0, q_new, CR) 
+                        self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, q0, q_new, CR) 
                     else:
-                        self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, gamma, q0, q_new, CR=1) 
+                        self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, q0, q_new, CR=1) 
         
             self.iter += 1
         except Exception as e:
@@ -293,24 +294,8 @@ class Dream(ArrayStep):
             raise e
         return q_new
     
-    def estimate_crossover_probabilities(self, iteration, ndim, gamma, q0, q_new, CR):
+    def estimate_crossover_probabilities(self, iteration, ndim, q0, q_new, CR):
         cross_probs = Dream_shared_vars.cross_probs[0:self.nCR]   
-#        print 'Pulled out crossover probabilities.  Starting values = ',cross_probs
-#        m_loc = np.where(np.random.multinomial(1, cross_probs)==1)[0]
-#        #print 'Calculated m_loc = ',m_loc
-#        CR = crossover_values[m_loc]
-#        print 'Selected CR = ',CR
-
-#        #print 'Updated shared L = ',Dream_shared_vars.ncr_updates
-#        
-#        proposed_pt = self.generate_proposal_points(1, gamma, q0, CR, snooker=False)
-#        print 'Generated proposal point with CR.'
-#        
-#        if self.last_logp == None:
-#            self.last_logp = logp(q0)
-#            
-#        q_new = metrop_select(logp(np.squeeze(proposed_pt)) - self.last_logp, np.squeeze(proposed_pt), q0)
-#        #print 'Selected proposal point. q_new: ',q_new
         
         current_positions = np.frombuffer(Dream_shared_vars.current_positions.get_obj())
         nchains = len(current_positions)/ndim
@@ -332,7 +317,7 @@ class Dream(ArrayStep):
         #print 'Sum: ',np.sum((q_new-q0)**2/sd_by_dim**2)
         m_loc = np.where(self.CR_values == CR)[0]
         Dream_shared_vars.ncr_updates[m_loc] += 1
-        Dream_shared_vars.delta_m[m_loc] = Dream_shared_vars.delta_m[m_loc] + np.sum((q_new - q0)**2/sd_by_dim**2)
+        Dream_shared_vars.delta_m[m_loc] = Dream_shared_vars.delta_m[m_loc] + np.nan_to_num(np.sum((q_new - q0)**2/sd_by_dim**2))
         #print 'Squared normalized jumping distance for m = ',m_loc,' = ',Dream_shared_vars.delta_m[m_loc]
         
         #Update probabilities of tested crossover value
