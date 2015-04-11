@@ -122,7 +122,6 @@ class Dream(ArrayStep):
                     run_snooker = True
                 else:
                     run_snooker = False
-                print 'Snooker decision: ',run_snooker
             else:
                 run_snooker = False
         
@@ -131,7 +130,6 @@ class Dream(ArrayStep):
                 CR_loc = np.where(np.random.multinomial(1, self.CR_probabilities)==1)
                 #print 'CR_loc chosen: ',CR_loc
                 CR = self.CR_values[CR_loc]
-                print 'Set CR to: ',CR
             else:
                 CR = 1 
             
@@ -176,7 +174,6 @@ class Dream(ArrayStep):
                     print 'Generated new logps. New logps: ',log_ps
 
                 #Randomly select one of the tested points with probability proportional to the probability density at the point
-                #Ignore logps that aren't finite (i.e. -inf if the proposed point is outside of a uniform prior)
                 log_ps = np.array(log_ps)
                 
                 
