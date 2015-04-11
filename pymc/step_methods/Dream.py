@@ -19,7 +19,7 @@ import traceback
 __all__ = ['Dream']
 
 class Dream(ArrayStep):
-    def __init__(self, variables=None, nseedchains=None, nCR = 3, adapt_crossover = True, crossover_burnin=None, DEpairs=1, adaptationRate=.65, lamb=.05, zeta=1e-12, verbose=False, save_history = False, history_file = False, start_random=True, snooker=.10, p_gamma_unity = .20, appending_rate=10, multitry=False, model=None, **kwargs):
+    def __init__(self, variables=None, nseedchains=None, nCR = 3, adapt_crossover = True, crossover_burnin=None, DEpairs=1, adaptationRate=.65, lamb=.05, zeta=1e-12, verbose=False, save_history = False, history_file = False, history_thin = 10, start_random=True, start_from_history=False, snooker=.10, p_gamma_unity = .20, multitry=False, model=None, **kwargs):
         
         model = modelcontext(model)
                 
@@ -41,7 +41,6 @@ class Dream(ArrayStep):
         self.snooker = snooker
         self.gamma = None
         self.p_gamma_unity = p_gamma_unity #This is the probability of setting gamma=1
-        self.appending_rate = appending_rate
         if multitry == False:
             self.multitry = 1
         elif multitry == True:
@@ -66,6 +65,7 @@ class Dream(ArrayStep):
         self.len_history = 0
         self.save_history = save_history
         self.history_file = history_file
+        self.history_thin = history_thin
         self.start_random = start_random
         
         super(Dream, self).__init__(variables, [model.fastlogp], **kwargs)
@@ -107,7 +107,6 @@ class Dream(ArrayStep):
                     with Dream_shared_vars.history.get_lock():
                         self.len_history = len(np.frombuffer(Dream_shared_vars.history.get_obj()))
                         print 'setting len history = ', self.len_history
-                    print 'History at start: ',str(Dream_shared_vars.history[0::])
             
             except AttributeError:
                 raise Exception('Dream should be run with multiple chains in parallel.  Set njobs > 1.')      
@@ -190,12 +189,12 @@ class Dream(ArrayStep):
                 logp_prob = log_ps_sub/sum_proposal_logps
                 best_logp_loc = np.where(np.random.multinomial(1, logp_prob)==1)[0]
                 q_proposal = np.squeeze(proposed_pts[best_logp_loc])
-                print 'logps proposed = '+str(log_ps)+' Selected logp = '+str(log_ps[best_logp_loc])+' Point = '+str(q_proposal)
+                #print 'logps proposed = '+str(log_ps)+' Selected logp = '+str(log_ps[best_logp_loc])+' Point = '+str(q_proposal)
             
                 #Draw reference points around the randomly selected proposal point
                 with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
                     if run_snooker is True:
-                        reference_pts, snooker_logp_ref = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
+                        reference_pts, snooker_logp_ref, z_ref = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
                     else:
                         reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
                     #print 'Generated reference points: ',reference_pts
@@ -220,8 +219,7 @@ class Dream(ArrayStep):
                 self.last_logp = logp(q0)
         
             if self.multitry > 1:
-                np.append(ref_log_ps, self.last_logp)
-                ref_log_ps = np.array(ref_log_ps)
+                ref_log_ps = np.append(ref_log_ps, self.last_logp)
 
                 if run_snooker is True:
                     total_proposal_logp = log_ps + snooker_logp_prop
@@ -229,13 +227,12 @@ class Dream(ArrayStep):
                     # First determine p(y --> X) (i.e. moving from proposed point y to original point X)
                     # p(y --> X) equals ||y - z||^(n-1), i.e. the snooker_logp for the proposed point
                     # p(Xref --> X) is equal to p(Xref --> y) * p(y --> X) (i.e. moving from Xref to proposed point y to original point X)
+                    snooker_logp_ref = np.append(snooker_logp_ref, 0)
                     total_reference_logp = ref_log_ps + snooker_logp_ref + snooker_logp_prop
                 
                 else:
                     total_proposal_logp = log_ps
-                    print 'total proposal logp: ',total_proposal_logp
                     total_reference_logp = ref_log_ps
-                    print 'total reference logp: ',total_reference_logp
                 
                 #Determine max logp for all proposed and reference points
                 max_logp = np.amax(np.concatenate((total_proposal_logp, total_reference_logp)))
@@ -272,9 +269,11 @@ class Dream(ArrayStep):
                     
                 self.last_logp = q_logp
         
-            #Place new point in history
-            with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.current_positions.get_lock():
-                self.record_history(self.nseedchains, self.total_var_dimension, q_new, self.len_history)
+            #Place new point in history given history thinning rate
+            if self.iter % self.history_thin == 0:
+                with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.current_positions.get_lock():
+                    print 'iteration: '+str(self.iter)+' adding point to history.'
+                    self.record_history(self.nseedchains, self.total_var_dimension, q_new, self.len_history)
         
             #If using multi-try DREAM, estimate ideal crossover probabilities for each dimension during burn-in.
             #Don't do this for the first 10 iterations to give all chains a chance to fill in the shared current position array
@@ -308,9 +307,9 @@ class Dream(ArrayStep):
         #print 'SD by dimension: ',sd_by_dim
         
         #Compute squared normalized jumping distance
-        print 'Shared delta m array before change: ',Dream_shared_vars.delta_m[0:self.nCR]
+        #print 'Shared delta m array before change: ',Dream_shared_vars.delta_m[0:self.nCR]
         #print 'constant: ',Dream_shared_vars.delta_m[m_loc]
-        print 'diff q_new and q0: ',q_new-q0
+        #print 'diff q_new and q0: ',q_new-q0
         #print 'diff squared: ',(q_new-q0)**2
         #print 'sd squared: ',sd_by_dim**2
         #print 'num/den: ',(q_new-q0)**2/sd_by_dim**2
@@ -323,24 +322,24 @@ class Dream(ArrayStep):
         #Update probabilities of tested crossover value
         tN = Dream_shared_vars.count.value - (nchains*10)
         #print 'tN : ',tN
-        print 'delta_m[m_loc]: ',Dream_shared_vars.delta_m[m_loc]
-        print 'ncr_updates[m_loc]: ',Dream_shared_vars.ncr_updates[m_loc]
+        #print 'delta_m[m_loc]: ',Dream_shared_vars.delta_m[m_loc]
+        #print 'ncr_updates[m_loc]: ',Dream_shared_vars.ncr_updates[m_loc]
         #print 'sum of delta_ms: ',np.sum(Dream_shared_vars.delta_m[0:self.nCR])
         #print 'num: ',tN*(Dream_shared_vars.delta_m[m_loc]/Dream_shared_vars.ncr_updates[m_loc])
         
         #Leave probabilities unchanged until all possible crossover values have had at least one successful move so that a given value's probability isn't prematurely set to 0, preventing further testing.
         delta_ms = np.array(Dream_shared_vars.delta_m[0:self.nCR])
         ncr_updates = np.array(Dream_shared_vars.ncr_updates[0:self.nCR])
-        print 'truth status: ',np.all(delta_ms != 0)
+        #print 'truth status: ',np.all(delta_ms != 0)
         sum_delta_m_per_iter = np.sum(delta_ms/ncr_updates)
         if np.all(delta_ms != 0) == True:
-            print 'All values have been successful at least once.  Changing crossover probabilities to reflect delta m values.'
+            #print 'All values have been successful at least once.  Changing crossover probabilities to reflect delta m values.'
             for m in range(self.nCR):
                 cross_probs[m] = (Dream_shared_vars.delta_m[m]/Dream_shared_vars.ncr_updates[m])/sum_delta_m_per_iter
         
         Dream_shared_vars.cross_probs[0:self.nCR] = cross_probs
         
-        print 'Current crossover value probabilities: ',cross_probs 
+        #print 'Current crossover value probabilities: ',cross_probs 
         
         self.CR_probabilities = cross_probs
         
@@ -390,9 +389,9 @@ class Dream(ArrayStep):
         if snooker is False:
             #print 'Generating pts with no snooker update. n proposed pts= ',n_proposed_pts
             sampled_history_pts = np.array([self.sample_from_history(self.nseedchains, DEpairs, self.total_var_dimension) for i in range(n_proposed_pts)])
-            print 'history shape: ',sampled_history_pts.shape           
+            #print 'history shape: ',sampled_history_pts.shape           
             chain_differences = np.array([np.sum(sampled_history_pts[i][0:2*DEpairs], axis=0)-np.sum(sampled_history_pts[i][2*DEpairs:DEpairs*4], axis=0) for i in range(len(sampled_history_pts))])
-            print 'chain_differences_shape: ',chain_differences.shape            
+            #print 'chain_differences_shape: ',chain_differences.shape            
             #print 'Generated chain differences with DEpairs>0.  chain differences = ',chain_differences
             zeta = np.array([np.random.normal(0, self.zeta, self.total_var_dimension) for i in range(n_proposed_pts)])
             e = np.array([np.random.uniform(-self.lamb, self.lamb, self.total_var_dimension) for i in range(n_proposed_pts)])
@@ -402,8 +401,8 @@ class Dream(ArrayStep):
                 if n_proposed_pts > 1:
                     d_prime = [len(U[point][np.where(U[point]<CR)]) for point in range(n_proposed_pts)]
                     self.gamma = [self.set_gamma(self.iter, DEpairs, snooker, CR, d_p) for d_p in d_prime]
-                    print 'd_primes: ',d_prime
-                    print 'gammas: ',self.gamma
+                    #print 'd_primes: ',d_prime
+                    #print 'gammas: ',self.gamma
                 else:
                     d_prime = len(U[np.where(U<CR)])
                     self.gamma = self.set_gamma(self.iter, DEpairs, snooker, CR, d_prime)
@@ -411,10 +410,10 @@ class Dream(ArrayStep):
                 self.gamma = self.set_gamma(self.iter, DEpairs, snooker, CR, d_prime)
             
             if n_proposed_pts > 1:
-                proposed_pts = [q0 + e[point]*gamma*chain_differences[point] + zeta[point] for point, gamma in range(n_proposed_pts), self.gamma]
+                proposed_pts = [q0 + e[point]*gamma*chain_differences[point] + zeta[point] for point, gamma in zip(range(n_proposed_pts), self.gamma)]
             else:
                 proposed_pts = q0+ e*self.gamma*chain_differences + zeta
-            print 'proposed points: ',proposed_pts
+            #print 'proposed points: ',proposed_pts
             if self.adapt_crossover is True and d_prime != self.total_var_dimension:
                 if n_proposed_pts > 1:
                     for point, pt_num in zip(proposed_pts, range(n_proposed_pts)):
@@ -434,14 +433,14 @@ class Dream(ArrayStep):
             return proposed_pts, snooker_logp, z
         
     def snooker_update(self, n_proposed_pts, q0):
-        print 'iteration: ',self.iter,' running snooker update'
+        #print 'iteration: ',self.iter,' running snooker update'
         sampled_history_pt = [self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension, snooker=True) for i in range(n_proposed_pts)]
-        print 'sampled history point: ',sampled_history_pt
+        #print 'sampled history point: ',sampled_history_pt
         chains_to_be_projected = np.squeeze([np.array([self.sample_from_history(self.nseedchains, self.DEpairs, self.total_var_dimension, snooker=True) for i in range(2)]) for x in range(n_proposed_pts)])
-        print 'chains to be projected shape: ',chains_to_be_projected.shape        
+        #print 'chains to be projected shape: ',chains_to_be_projected.shape        
         #Define projection vector
         proj_vec_diff = np.squeeze(q0-sampled_history_pt)
-        print 'proj vec diff: ',proj_vec_diff
+        #print 'proj vec diff: ',proj_vec_diff
         if n_proposed_pts > 1:
             D = [np.dot(proj_vec_diff[point], proj_vec_diff[point]) for point in range(len(proj_vec_diff))]
             
@@ -461,13 +460,13 @@ class Dream(ArrayStep):
             proposed_pts = q0 + dx
             snooker_logp = np.log(np.linalg.norm(proposed_pts-sampled_history_pt))*(self.total_var_dimension-1)
             
-        print 'D: ',D
-        print 'diff chains to be projected: ',diff_chains_to_be_projected
-        print 'zP: ',zP
-        print 'gamma: ',self.gamma
+        #print 'D: ',D
+        #print 'diff chains to be projected: ',diff_chains_to_be_projected
+        #print 'zP: ',zP
+        #print 'gamma: ',self.gamma
 
         
-        print 'proposed points: ',proposed_pts
+        #print 'proposed points: ',proposed_pts
         
         return proposed_pts, snooker_logp, sampled_history_pt
     
