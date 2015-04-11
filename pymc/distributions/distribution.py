@@ -2,7 +2,7 @@ import theano.tensor as t
 import numpy as np
 from ..model import Model
 
-__all__ = ['DensityDist', 'Distribution', 'Continuous', 'Discrete']
+__all__ = ['DensityDist', 'Distribution', 'Continuous', 'Discrete', 'ArbLikelihood']
 
 
 class Distribution(object):
@@ -79,6 +79,15 @@ class DensityDist(Distribution):
     def __init__(self, logp, shape=(), dtype='float64',testval=0, *args, **kwargs):
         super(DensityDist, self).__init__(shape, dtype, testval, *args, **kwargs)
         self.logp = logp
+
+class ArbLikelihood(Distribution):
+    """To allow creation of arbitrary likelihood."""
+    def __init__(self, logp, shape=(), dtype='float64',testval=0, *args, **kwargs):
+        super(ArbLikelihood, self).__init__(shape, dtype, testval, *args, **kwargs)
+        self.logp_fxn = logp
+        
+    def logp(self,value):
+        return self.logp_fxn
 
 class MultivariateContinuous(Continuous):
 
