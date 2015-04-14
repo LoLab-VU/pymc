@@ -19,7 +19,7 @@ import traceback
 __all__ = ['Dream']
 
 class Dream(ArrayStep):
-    def __init__(self, variables=None, nseedchains=None, nCR = 3, adapt_crossover = True, crossover_burnin=None, DEpairs=1, adaptationRate=.65, lamb=.05, zeta=1e-12, verbose=False, save_history = False, history_file = False, history_thin = 10, start_random=True, start_from_history=False, snooker=.10, p_gamma_unity = .20, multitry=False, model=None, **kwargs):
+    def __init__(self, variables=None, nseedchains=None, nCR = 3, adapt_crossover = True, crossover_burnin=None, DEpairs=1, adaptationRate=.65, lamb=.05, zeta=1e-12, verbose=False, save_history = False, history_file = False, history_thin = 10, start_random=True, start_from_history=False, snooker=.10, p_gamma_unity = .20, multitry=False, parallel=False, model=None, **kwargs):
         
         model = modelcontext(model)
                 
@@ -47,6 +47,7 @@ class Dream(ArrayStep):
             self.multitry = 5
         else:
             self.multitry = multitry
+        self.parallel = parallel
         self.lamb = lamb #This is e sub d in DREAM papers
         self.zeta = zeta #This is epsilon in DREAM papers
         self.last_logp = None
@@ -68,9 +69,9 @@ class Dream(ArrayStep):
         self.history_thin = history_thin
         self.start_random = start_random
         
-        super(Dream, self).__init__(variables, [model.fastlogp], **kwargs)
+        super(Dream, self).__init__(variables, [model.fastlogp], allvars=True, **kwargs)
     
-    def astep(self, q0, logp):
+    def astep(self, q0, logp, all_vars_point):
         # On first iteration, check that shared variables have been initialized (which only occurs if multiple chains have been started).
         if self.iter == 0:   
             print 'Dream has started'
@@ -109,10 +110,7 @@ class Dream(ArrayStep):
                         print 'setting len history = ', self.len_history
             
             except AttributeError:
-                raise Exception('Dream should be run with multiple chains in parallel.  Set njobs > 1.')      
-        
-        # Set gamma depending on iteration; every 5th iteration over all chains, large jumps are allowed
-        #Gamma for snooker update is drawn from U[1.2, 2.2] as suggested in ter Braak 2008.     
+                raise Exception('Dream should be run with multiple chains in parallel.  Set njobs > 1.')          
         
         try:
             if self.snooker != 0:
@@ -152,15 +150,17 @@ class Dream(ArrayStep):
                 q_logp = logp(np.squeeze(proposed_pts))
                 q = np.squeeze(proposed_pts)
             else:
-                #mp.log_to_stderr(logging.DEBUG)
-                #p = mp.Pool(self.multitry)
-                #args = zip([self]*self.multitry, np.squeeze(proposed_pts))
-                #log_ps = p.map(call_logp, args)
-                #p.close()
-                #p.join()
-                log_ps = []
-                for pt in np.squeeze(proposed_pts):
-                    log_ps.append(logp(pt))
+                mp.log_to_stderr(logging.DEBUG)
+                if self.parallel:
+                    p = mp.Pool(self.multitry)
+                    args = zip([self]*self.multitry, np.squeeze(proposed_pts), [all_vars_point]*self.multitry)
+                    log_ps = p.map(call_logp, args)
+                    p.close()
+                    p.join()
+                else:
+                    log_ps = []
+                    for pt in np.squeeze(proposed_pts):
+                        log_ps.append(logp(pt))
                 #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
                 while np.all(np.isfinite(np.array(log_ps))==False):
                     print 'All logps infinite. Generating new proposal. Old logps: ',log_ps
@@ -176,7 +176,6 @@ class Dream(ArrayStep):
                 #Randomly select one of the tested points with probability proportional to the probability density at the point
                 log_ps = np.array(log_ps)
                 
-                
                 #Substract largest logp from all logps (this from original Matlab code)
                 max_logp = np.amax(log_ps)
                 log_ps_sub = np.exp(log_ps - max_logp)
@@ -185,6 +184,7 @@ class Dream(ArrayStep):
                 sum_proposal_logps = np.sum(log_ps_sub)
                 logp_prob = log_ps_sub/sum_proposal_logps
                 best_logp_loc = np.where(np.random.multinomial(1, logp_prob)==1)[0]
+                #print 'logps: ',log_ps,'max_logp: ',max_logp,'log_ps_sub: ',log_ps_sub,'sum_proposal_logps: ',sum_proposal_logps,'logp_prob: ',logp_prob,'best_logp_loc: ',best_logp_loc
                 q_proposal = np.squeeze(proposed_pts[best_logp_loc])
                 #print 'logps proposed = '+str(log_ps)+' Selected logp = '+str(log_ps[best_logp_loc])+' Point = '+str(q_proposal)
             
@@ -198,14 +198,16 @@ class Dream(ArrayStep):
             
                 #Compute posterior density at reference points.
                 if self.multitry > 2:
-                    #p = mp.Pool(self.multitry-1)
-                    #args = zip([self]*self.multitry, np.squeeze(reference_pts))
-                    #ref_log_ps = p.map(call_logp, args)
-                    #p.close()
-                    #p.join()
-                    ref_log_ps = []
-                    for pt in np.squeeze(reference_pts):
-                        ref_log_ps.append(logp(pt))
+                    if self.parallel:
+                        p = mp.Pool(self.multitry-1)
+                        args = zip([self]*(self.multitry-1), np.squeeze(reference_pts), [all_vars_point]*(self.multitry-1))
+                        ref_log_ps = p.map(call_logp, args)
+                        p.close()
+                        p.join()
+                    else:
+                        ref_log_ps = []
+                        for pt in np.squeeze(reference_pts):
+                            ref_log_ps.append(logp(pt))
                 else:
                     ref_log_ps = np.array([logp(np.squeeze(reference_pts))])
             
@@ -516,13 +518,14 @@ class Dream(ArrayStep):
 def call_logp(args):
     #Defined at top level so it can be pickled.
     instance = args[0]
-    point = args[1]
+    tested_point = args[1]
+    original_point = args[2]
     
     logp_fxn = getattr(instance, 'fs')[0]
     ordering = getattr(instance, 'ordering')
-    bij = DictToArrayBijection(ordering, {})
+    bij = DictToArrayBijection(ordering, original_point)
     logp = bij.mapf(logp_fxn)
-    return logp(point)
+    return logp(tested_point)
 
         
 class NoDaemonProcess(mp.Process):

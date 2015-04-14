@@ -218,7 +218,6 @@ def _mp_sample(njobs, args):
            raise Exception('Dream should be run with at least (2*DEpairs)+1 number of chains.  For current algorithmic settings, set njobs>=%s.' %str(min_njobs))
        if step_method.history_file != False:
            old_history = np.load(step_method.history_file)
-           print 'Old history loaded from file: ',old_history
            len_old_history = len(old_history.flatten())
            nold_history_records = len_old_history/step_method.total_var_dimension
            step_method.nseedchains = nold_history_records
