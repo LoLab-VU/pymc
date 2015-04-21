@@ -209,46 +209,9 @@ def _choose_backend(trace, chain, shortcuts=None, **kwds):
 
 
 def _mp_sample(njobs, args):
-    # If using DREAM stepping method, allocate a shared history array, a count variable, and a variable denoting whether or not the history has been seeded with draws from the prior.
-    #mp.log_to_stderr(logging.DEBUG)    
+    # If using DREAM stepping method, allocate a shared history array, a count variable, and a variable denoting whether or not the history has been seeded with draws from the prior.   
     if 'Dream' in str(args[0]):
-       step_method = args[0][1]
-       min_njobs = (2*len(step_method.DEpairs))+1
-       if njobs < min_njobs:
-           raise Exception('Dream should be run with at least (2*DEpairs)+1 number of chains.  For current algorithmic settings, set njobs>=%s.' %str(min_njobs))
-       if step_method.history_file != False:
-           old_history = np.load(step_method.history_file)
-           len_old_history = len(old_history.flatten())
-           nold_history_records = len_old_history/step_method.total_var_dimension
-           step_method.nseedchains = nold_history_records
-           arr_dim = np.floor((((njobs*args[0][0])*step_method.total_var_dimension)/step_method.history_thin))+len_old_history
-       else:
-           arr_dim = np.floor(((njobs*args[0][0]*step_method.total_var_dimension)/step_method.history_thin))+(step_method.nseedchains*step_method.total_var_dimension)
-       min_nseedchains = 2*len(step_method.DEpairs)*njobs
-       if step_method.nseedchains < min_nseedchains:
-           raise Exception('The size of the seeded starting history is insufficient.  Increase nseedchains>=%s.' %str(min_nseedchains))
-       current_position_dim = njobs*step_method.total_var_dimension
-       history_arr = mp.Array('d', [0]*arr_dim)
-       if step_method.history_file != False:
-           history_arr[0:len_old_history] = old_history.flatten()
-       nCR = step_method.nCR
-       if step_method.crossover_file != False:
-           fitted_crossover = np.load(step_method.crossover_file)
-           crossover_probabilities = mp.Array('d', fitted_crossover)
-           step_method.adapt_crossover = False
-       else:
-           crossover_probabilities = mp.Array('d', [0]*nCR)
-       
-       ncrossover_updates = mp.Array('d', [0]*nCR)
-       delta_m = mp.Array('d', [0]*nCR)
-       current_position_arr = mp.Array('d', [0]*current_position_dim)
-       nchains = mp.Value('i', njobs)
-       n = mp.Value('i', 0)
-       tf = mp.Value('c', 'F')
-       if step_method.crossover_burnin == None:
-           step_method.crossover_burnin = int(np.floor(args[0][0]/10))
-       print 'Launching jobs'
-       p = DreamPool(njobs, initializer=mp_dream_init, initargs=(history_arr, current_position_arr, nchains, crossover_probabilities, ncrossover_updates, delta_m, n, tf, ))
+       p = mp_dream_pool(njobs, args)
     else:
        p = mp.Pool(njobs)
     print 'Jobs launched'
@@ -260,6 +223,47 @@ def _mp_sample(njobs, args):
     p.close()
     p.join()
     return merge_traces(traces)
+
+def mp_dream_pool(njobs, args):
+    step_method = args[0][1]
+    min_njobs = (2*len(step_method.DEpairs))+1
+    if njobs < min_njobs:
+        raise Exception('Dream should be run with at least (2*DEpairs)+1 number of chains.  For current algorithmic settings, set njobs>=%s.' %str(min_njobs))
+    if step_method.history_file != False:
+        old_history = np.load(step_method.history_file)
+        len_old_history = len(old_history.flatten())
+        nold_history_records = len_old_history/step_method.total_var_dimension
+        step_method.nseedchains = nold_history_records
+        arr_dim = np.floor((((njobs*args[0][0])*step_method.total_var_dimension)/step_method.history_thin))+len_old_history
+    else:
+        arr_dim = np.floor(((njobs*args[0][0]*step_method.total_var_dimension)/step_method.history_thin))+(step_method.nseedchains*step_method.total_var_dimension)
+    min_nseedchains = 2*len(step_method.DEpairs)*njobs
+    if step_method.nseedchains < min_nseedchains:
+        raise Exception('The size of the seeded starting history is insufficient.  Increase nseedchains>=%s.' %str(min_nseedchains))
+    current_position_dim = njobs*step_method.total_var_dimension
+    history_arr = mp.Array('d', [0]*arr_dim)
+    if step_method.history_file != False:
+        history_arr[0:len_old_history] = old_history.flatten()
+    nCR = step_method.nCR
+    if step_method.crossover_file != False:
+        fitted_crossover = np.load(step_method.crossover_file)
+        crossover_probabilities = mp.Array('d', fitted_crossover)
+        step_method.adapt_crossover = False
+    else:
+        crossover_probabilities = mp.Array('d', [0]*nCR)
+       
+    ncrossover_updates = mp.Array('d', [0]*nCR)
+    delta_m = mp.Array('d', [0]*nCR)
+    current_position_arr = mp.Array('d', [0]*current_position_dim)
+    nchains = mp.Value('i', njobs)
+    n = mp.Value('i', 0)
+    tf = mp.Value('c', 'F')
+    if step_method.crossover_burnin == None:
+        step_method.crossover_burnin = int(np.floor(args[0][0]/10))
+
+    p = DreamPool(njobs, initializer=mp_dream_init, initargs=(history_arr, current_position_arr, nchains, crossover_probabilities, ncrossover_updates, delta_m, n, tf, ))
+    
+    return p
 
 def mp_dream_init(arr, cp_arr, nchains, crossover_probs, ncrossover_updates, delta_m, val, switch):
       step_methods.Dream_shared_vars.history = arr
