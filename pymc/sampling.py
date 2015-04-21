@@ -231,12 +231,18 @@ def _mp_sample(njobs, args):
        history_arr = mp.Array('d', [0]*arr_dim)
        if step_method.history_file != False:
            history_arr[0:len_old_history] = old_history.flatten()
-       current_position_arr = mp.Array('d', [0]*current_position_dim)
-       nchains = mp.Value('i', njobs)
        nCR = step_method.nCR
-       crossover_probabilities = mp.Array('d', [0]*nCR)
+       if step_method.crossover_file != False:
+           fitted_crossover = np.load(step_method.crossover_file)
+           crossover_probabilities = mp.Array('d', fitted_crossover)
+           step_method.adapt_crossover = False
+       else:
+           crossover_probabilities = mp.Array('d', [0]*nCR)
+       
        ncrossover_updates = mp.Array('d', [0]*nCR)
        delta_m = mp.Array('d', [0]*nCR)
+       current_position_arr = mp.Array('d', [0]*current_position_dim)
+       nchains = mp.Value('i', njobs)
        n = mp.Value('i', 0)
        tf = mp.Value('c', 'F')
        if step_method.crossover_burnin == None:
