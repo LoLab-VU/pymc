@@ -10,12 +10,17 @@ from numpy.random import seed
 import logging
 from step_methods.Dream import DreamPool
 import traceback
+try:
+    from mpi4py import MPI
+    mpi_avail = True
+except ImportError:
+    mpi_avail = False
 
 __all__ = ['sample', 'iter_sample']
 
 
 def sample(draws, step, start=None, trace=None, chain=0, njobs=1, tune=None,
-           progressbar=True, model=None, random_seed=None):
+           progressbar=True, model=None, random_seed=None, use_mpi=False):
     """
     Draw a number of samples using the given step method.
     Multiple step methods supported via compound step method
@@ -83,8 +88,13 @@ def sample(draws, step, start=None, trace=None, chain=0, njobs=1, tune=None,
                      pbars,
                      [model] * njobs,
                      random_seeds)
-        sample_func = _mp_sample
-        sample_args = [njobs, argset]
+        if not mpi_avail or use_mpi==False:
+            sample_func = _mp_sample
+            sample_args = [njobs, argset]
+        else:
+            print 'About to enter mpi sample function.'
+            sample_func = _mpi_sample
+            sample_args = [njobs, argset]
     else:
         sample_func = _sample
         sample_args = [draws, step, start, trace, chain,
@@ -207,7 +217,6 @@ def _choose_backend(trace, chain, shortcuts=None, **kwds):
     except KeyError:
         raise ValueError('Argument `trace` is invalid.')
 
-
 def _mp_sample(njobs, args):
     # If using DREAM stepping method, allocate a shared history array, a count variable, and a variable denoting whether or not the history has been seeded with draws from the prior.
     #mp.log_to_stderr(logging.DEBUG)    
@@ -270,6 +279,35 @@ def mp_dream_init(arr, cp_arr, nchains, crossover_probs, ncrossover_updates, del
       step_methods.Dream_shared_vars.delta_m = delta_m
       step_methods.Dream_shared_vars.count = val
       step_methods.Dream_shared_vars.history_seeded = switch
+      
+def _mpi_sample(njobs, args):
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    trace = _sample(*args[rank])
+    print 'Finished trace in rank: ',rank
+    if rank != 0:
+        comm.send(trace, dest=0, tag=1)
+        print 'Sent trace from rank: ',rank
+        traces = []
+    #comm.Barrier()
+    if rank == 0:
+        traces = [trace]
+        for rank in range(1, size):
+            trace = comm.recv(source=rank, tag=1)
+            traces.append(trace)
+        print 'Final trace list: ',traces
+        return merge_traces(traces)
+    
+def _mpi_init(args):
+    comm = MPI.Comm.Get_parent()
+    rank = comm.Get_rank()
+    trace = _sample(*args[rank])
+    print 'Finished trace in rank: ',rank
+    comm.send(trace, dest=0, tag=1)
+    print 'Sent trace from rank: ',rank    
+    comm.Barrier()
+    comm.Disconnect()        
 
 def stop_tuning(step):
     """ stop tuning the current step method """
