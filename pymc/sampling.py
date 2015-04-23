@@ -229,7 +229,9 @@ def _mp_sample(njobs, args):
            old_history = np.load(step_method.history_file)
            len_old_history = len(old_history.flatten())
            nold_history_records = len_old_history/step_method.total_var_dimension
-           step_method.nseedchains = nold_history_records
+           for job in range(njobs):
+               sm = args[job][1]
+               sm.nseedchains = nold_history_records
            arr_dim = np.floor((((njobs*args[0][0])*step_method.total_var_dimension)/step_method.history_thin))+len_old_history
        else:
            arr_dim = np.floor(((njobs*args[0][0]*step_method.total_var_dimension)/step_method.history_thin))+(step_method.nseedchains*step_method.total_var_dimension)
@@ -283,32 +285,103 @@ def mp_dream_init(arr, cp_arr, nchains, crossover_probs, ncrossover_updates, del
 def _mpi_sample(njobs, args):
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
-    size = comm.Get_size()
-    trace = _sample(*args[rank])
-    print 'Finished trace in rank: ',rank
-    if rank != 0:
-        comm.send(trace, dest=0, tag=1)
-        print 'Sent trace from rank: ',rank
-        traces = []
-    #comm.Barrier()
+    
+    if 'Dream' in str(args[0]):
+        #Assign extra available ranks to chain running ranks for use with multitry
+        rank_assignments = {}
+        size = comm.Get_size()
+        unused_ranks = size - njobs
+        ranks_per_chain = unused_ranks/njobs
+        extra_ranks = unused_ranks%njobs
+        for parent in range(njobs):
+            start_idx = njobs + (parent*ranks_per_chain)
+            end_idx = start_idx + ranks_per_chain
+            assigned_ranks = range(size)[start_idx:end_idx]
+            if parent in range(extra_ranks):
+                start_idx = size - extra_ranks
+                assigned_ranks.append(range(start_idx, size)[parent])
+            rank_assignments[parent] = assigned_ranks
+            for child in assigned_ranks:
+                rank_assignments[child] = parent
+            
+        print 'Assigned ranks: ',rank_assignments
+        
+        #Create communicator for just the ranks running chains
+        all_group = comm.Get_group()
+        chains = range(njobs)
+        chain_group = all_group.Incl(chains)
+        newcomm = comm.Create(chain_group)
+        chain_comm = newcomm
+      
+    if rank < njobs:
+        if 'Dream' in str(args[0]):
+            args = _mpi_dream_init(njobs, args, rank, rank_assignments, chain_comm)
+        trace = _sample(*args[rank])
+        print 'Finished trace in rank: ',rank
+        if rank != 0:
+            comm.send(trace, dest=0, tag=1)
+            traces = []
+    
+    else:
+        logp_fxn = args[0][1].fs[0]
+        ordering = args[0][1].ordering
+        running = True
+        assigned_source = rank_assignments[rank]
+        tag = rank
+        while running == True:
+            pts = comm.recv(source=assigned_source, tag=tag)
+            if pts == 'quit':
+                break
+            pt_to_eval = pts[0]
+            old_pt = pts[1]
+            bij = DictToArrayBijection(ordering, old_pt)
+            mapped_logp = bij.mapf(logp_fxn)
+            logp = mapped_logp(pt_to_eval)    
+            comm.send(logp, dest=assigned_source, tag=tag)
+            tag += 1
     if rank == 0:
         traces = [trace]
-        for rank in range(1, size):
+        for rank in range(1, njobs):
             trace = comm.recv(source=rank, tag=1)
             traces.append(trace)
-        print 'Final trace list: ',traces
         return merge_traces(traces)
-    
-def _mpi_init(args):
-    comm = MPI.Comm.Get_parent()
-    rank = comm.Get_rank()
-    trace = _sample(*args[rank])
-    print 'Finished trace in rank: ',rank
-    comm.send(trace, dest=0, tag=1)
-    print 'Sent trace from rank: ',rank    
-    comm.Barrier()
-    comm.Disconnect()        
 
+def _mpi_dream_init(njobs, args, rank, rank_assignments, chain_comm):
+    step_method = args[0][1]
+    min_njobs = (2*len(step_method.DEpairs))+1
+    if njobs < min_njobs:
+       raise Exception('Dream should be run with at least (2*DEpairs)+1 number of chains.  For current algorithmic settings, set njobs>=%s.' %str(min_njobs))
+    if step_method.history_file != False:
+       old_history = np.load(step_method.history_file)
+       len_old_history = len(old_history.flatten())
+       nold_history_records = len_old_history/step_method.total_var_dimension
+       for job in range(njobs):
+           sm = args[job][1]
+           sm.nseedchains = nold_history_records
+    
+    min_nseedchains = 2*len(step_method.DEpairs)*njobs
+    if step_method.nseedchains < min_nseedchains:
+       raise Exception('The size of the seeded starting history is insufficient.  Increase nseedchains>=%s.' %str(min_nseedchains))
+       
+    if step_method.crossover_file != False:
+        for job in range(njobs):
+            sm = args[job][1]
+            sm.adapt_crossover = False
+       
+    if step_method.crossover_burnin == None:
+        for job in range(njobs):
+            sm = args[job][1]
+            sm.crossover_burnin = int(np.floor(args[0][0]/10))
+    
+    for job in range(njobs):
+        sm = args[job][1]
+        sm.draws = args[0][0]
+        sm.nchains = njobs
+        sm.assigned_ranks = rank_assignments[rank]
+        sm.chain_comm = chain_comm
+        
+    return args
+    
 def stop_tuning(step):
     """ stop tuning the current step method """
 
