@@ -326,8 +326,6 @@ class Dream_mpi(ArrayStep):
         
         self.iter += 1
 
-        print 'In rank : ',self.rank,' iteration = ',self.iter
-
         if self.iter==self.draws:
             if self.rank == 0 and self.save_history:
                 date_time_str = datetime.now().strftime('%Y_%m_%d_%H:%M:%S')+'_'
@@ -356,7 +354,6 @@ class Dream_mpi(ArrayStep):
             self.current_positions[start_cp:end_cp] = np.array(q_new).flatten()
             
         if self.rank == 0:
-            print 'Current position array on rank 0: ',self.current_positions
             current_posit_reshape = self.current_positions.reshape((self.nchains, ndim))
         
             #print 'Replaced current position of current chain with new point. Current positions: ',current_positions
@@ -385,13 +382,9 @@ class Dream_mpi(ArrayStep):
             self.delta_m[m_loc] = self.delta_m[m_loc] + np.nan_to_num(np.sum((q_new - q0)**2/sd_by_dim**2))
             for rank in range(1, self.nchains):
                 delta_data = self.comm.recv(source=rank, tag=16)
-                print 'Received delta data from rank: ',rank
                 if delta_data[2] is True:
                     self.ncr_updates[delta_data[0]] += 1
                     self.delta_m[delta_data[0]] += delta_data[1]
-            
-            print 'NCR updates on rank 0: ',self.ncr_updates
-            print 'Delta M on rank 0: ',self.delta_m
     
             sum_delta_m_per_iter = np.sum(self.delta_m/self.ncr_updates)
             
@@ -402,11 +395,9 @@ class Dream_mpi(ArrayStep):
             
                 for rank in range(1, self.nchains):
                     self.comm.Send(self.CR_probabilities, dest=rank, tag=17)
-                    print 'Sent CR probs: ',self.CR_probabilities,' to rank: ',rank
         
                 if self.rank in range(1, self.nchains):
                     self.comm.Recv(self.CR_probabilities, source=0, tag=17)
-                    print 'Received CR probabilities ',self.CR_probabilities,' on rank: ',self.rank
             
          
     def set_gamma(self, iteration, DEpairs, snooker_choice, CR, d_prime):
@@ -546,11 +537,9 @@ class Dream_mpi(ArrayStep):
             for rank in range(1, self.nchains):
                 self.comm.Send(self.history_arr, dest=rank, tag=12)
                 self.comm.Send(self.count, dest=rank, tag=13)
-                print 'Sent history and count to rank: ',rank
         else:
             self.comm.Recv(self.history_arr, source=0, tag=12)
             self.comm.Recv(self.count, source=0, tag=13)
-            print 'Received history and count from rank 0 on rank: ',self.rank
         
         self.chain_comm.Barrier()
             
