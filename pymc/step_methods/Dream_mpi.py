@@ -9,20 +9,9 @@ from ..core import *
 from .arraystep import *
 import numpy as np
 import random
-import Dream_shared_vars
 from datetime import datetime
-import logging
-import traceback
-import multiprocessing as mp
-import multiprocessing.pool as mp_pool
-import os
 import itertools
-try:
-    from mpi4py import MPI
-    import sys
-    mpi_avail = True
-except ImportError:
-    mpi_avail = False
+from mpi4py import MPI
 
 __all__ = ['Dream_mpi']
 
@@ -109,7 +98,7 @@ class Dream_mpi(ArrayStep):
                 self.history_arr = history_arr
                 
                 if self.crossover_file != False:
-                    crossover_probabilities = np.load(step_method.crossover_file)
+                    crossover_probabilities = np.load(self.crossover_file)
                     self.CR_probabilities = crossover_probabilities
                 else:
                     crossover_probabilities = self.CR_probabilities
@@ -185,11 +174,6 @@ class Dream_mpi(ArrayStep):
         else:
                
             if self.parallel:
-                #print 'Current working directory: ',os.path.dirname(os.path.realpath(__file__))
-#                wd = os.path.dirname(os.path.realpath(__file__))
-#                call = wd+'/dream_multitry_mpi.py'
-#                #print 'call: ',call
-#                comm = MPI.COMM_SELF.Spawn(sys.executable, args=[call], maxprocs=self.multitry)
                 sent_ranks = []
                 tags = []
                 for rank_pt in zip(itertools.cycle(self.assigned_ranks), np.squeeze(proposed_pts)):
@@ -579,29 +563,4 @@ class Dream_mpi(ArrayStep):
         print 'Saving fitted crossover values: ',self.CR_probabilities,' to file.'
         np.save(filename, self.CR_probabilities)
     
-def call_logp(args):
-    #Defined at top level so it can be pickled.
-    instance = args[0]
-    tested_point = args[1]
-    original_point = args[2]
-    
-    logp_fxn = getattr(instance, 'fs')[0]
-    ordering = getattr(instance, 'ordering')
-    bij = DictToArrayBijection(ordering, original_point)
-    logp = bij.mapf(logp_fxn)
-    return logp(tested_point)
-
-        
-class NoDaemonProcess(mp.Process):
-    # make 'daemon' attribute always return False
-    def _get_daemon(self):
-        return False
-    def _set_daemon(self, value):
-        pass
-    daemon = property(_get_daemon, _set_daemon)
-
-#A subclass of multiprocessing.pool.Pool that allows processes to launch child processes (this is necessary for Dream to use multi-try)
-#Taken from http://stackoverflow.com/questions/6974695/python-process-pool-non-daemonic
-class DreamPool(mp_pool.Pool):
-    Process = NoDaemonProcess
         

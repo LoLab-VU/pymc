@@ -16,12 +16,6 @@ import traceback
 import multiprocessing as mp
 import multiprocessing.pool as mp_pool
 import os
-try:
-    from mpi4py import MPI
-    import sys
-    mpi_avail = True
-except ImportError:
-    mpi_avail = False
 
 __all__ = ['Dream']
 
@@ -162,34 +156,11 @@ class Dream(ArrayStep):
             else:
                 #mp.log_to_stderr(logging.DEBUG)
                 if self.parallel:
-                    if mpi_avail:
-                        print 'In MPI loop.'
-                        #print 'Current working directory: ',os.path.dirname(os.path.realpath(__file__))
-                        wd = os.path.dirname(os.path.realpath(__file__))
-                        call = wd+'/dream_multitry_mpi.py'
-                        #print 'call: ',call
-                        comm = MPI.COMM_SELF.Spawn(sys.executable, args=[call], maxprocs=self.multitry)
-                        for rank in range(self.multitry):
-                            comm.send(obj=self, dest=rank, tag=1)
-                            print 'Sent instance: ',self,' to rank: ',rank
-                            comm.send(obj=np.squeeze(proposed_pts)[rank], dest=rank, tag=2)
-                            print 'Sent point: ',np.squeeze(proposed_pts)[rank],' to rank: ',rank
-                            comm.send(obj=all_vars_point, dest=rank, tag=3)
-                            print 'Sent original point: ',all_vars_point,' to rank: ',rank
-                        log_ps = []
-                        comm.Barrier()
-                        for rank in range(self.multitry):
-                            eval_pt = comm.recv(source=rank, tag=4)
-                            print 'Received evaluated logp: ',eval_pt,' from rank: ',rank
-                            log_ps.append(eval_pt)
-                        'Final logps: ',log_ps
-                        comm.Disconnect()
-                    else:
-                        p = mp.Pool(self.multitry)
-                        args = zip([self]*self.multitry, np.squeeze(proposed_pts), [all_vars_point]*self.multitry)
-                        log_ps = p.map(call_logp, args)
-                        p.close()
-                        p.join()
+                    p = mp.Pool(self.multitry)
+                    args = zip([self]*self.multitry, np.squeeze(proposed_pts), [all_vars_point]*self.multitry)
+                    log_ps = p.map(call_logp, args)
+                    p.close()
+                    p.join()
                 else:
                     log_ps = []
                     for pt in np.squeeze(proposed_pts):
