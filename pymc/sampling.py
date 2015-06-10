@@ -259,7 +259,7 @@ def _mp_sample(njobs, args):
        if step_method.crossover_burnin == None:
            step_method.crossover_burnin = int(np.floor(args[0][0]/10))
        print 'Launching jobs'
-       p = DreamPool(njobs, initializer=mp_dream_init, initargs=(history_arr, current_position_arr, nchains, crossover_probabilities, ncrossover_updates, delta_m, n, tf, ))
+       p = DreamPool(njobs, initializer=_mp_dream_init, initargs=(history_arr, current_position_arr, nchains, crossover_probabilities, ncrossover_updates, delta_m, n, tf, ))
     else:
        p = mp.Pool(njobs)
     print 'Jobs launched'
@@ -272,7 +272,7 @@ def _mp_sample(njobs, args):
     p.join()
     return merge_traces(traces)
 
-def mp_dream_init(arr, cp_arr, nchains, crossover_probs, ncrossover_updates, delta_m, val, switch):
+def _mp_dream_init(arr, cp_arr, nchains, crossover_probs, ncrossover_updates, delta_m, val, switch):
       step_methods.Dream_shared_vars.history = arr
       step_methods.Dream_shared_vars.current_positions = cp_arr
       step_methods.Dream_shared_vars.nchains = nchains

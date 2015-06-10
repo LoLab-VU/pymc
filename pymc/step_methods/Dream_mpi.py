@@ -8,7 +8,6 @@ Created on Wed Oct  1 17:21:29 2014
 from ..core import *
 from .arraystep import *
 import numpy as np
-import random
 from datetime import datetime
 import itertools
 from mpi4py import MPI
@@ -79,6 +78,9 @@ class Dream_mpi(ArrayStep):
         if self.iter == 0:   
             print 'Dream has started'
             
+            self.rand_state = np.random.RandomState(self.rank)
+            print 'Set random seed to: ',self.rank       
+            
             if self.rank == 0:
                 if self.history_file != False:
                     old_history = np.load(self.history_file)
@@ -88,6 +90,8 @@ class Dream_mpi(ArrayStep):
                     history_arr[0:len_old_history] = old_history.flatten()
                     print 'Loaded history file.'
                 else:
+                    #Set this because the draw from prior is not set to use a method of the RandomState Class set above.
+                    np.random.seed(self.rank)
                     arr_dim = np.floor(((self.nchains*self.draws*self.total_var_dimension)/self.history_thin))+(self.nseedchains*self.total_var_dimension)                  
                     history_arr = np.zeros(arr_dim)
                     print 'Seeding history with draws from prior'
@@ -125,6 +129,9 @@ class Dream_mpi(ArrayStep):
                 print 'Received crossover probabilities on rank: ',self.rank
             
             if self.start_random:
+                #Set this because the draw from prior function isn't set to use a method of the RandomState class set above
+                if self.rank != 0:
+                    np.random.seed(self.rank)
                 print 'Setting start to random draw from prior.'
                 q0 = self.draw_from_prior(self.model, self.variables)
                 print 'Start: ',q0
@@ -136,7 +143,8 @@ class Dream_mpi(ArrayStep):
             print 'Assigned ranks: ',self.assigned_ranks,' to rank: ',self.rank
                 
         if self.snooker != 0:
-            snooker_choice = np.where(np.random.multinomial(1, [self.snooker, 1-self.snooker])==1)
+            snooker_choice = np.where(self.rand_state.multinomial(1, [self.snooker, 1-self.snooker])==1)
+            print 'In rank: ',self.rank,' snooker choice: ',snooker_choice
             #print 'Snooker choice: ',snooker_choice
             if snooker_choice[0] == 0:
                 run_snooker = True
@@ -146,18 +154,21 @@ class Dream_mpi(ArrayStep):
             run_snooker = False
         
 
+
         #Set CR value for generating proposal point
-        CR_loc = np.where(np.random.multinomial(1, self.CR_probabilities)==1)
+        CR_loc = np.where(self.rand_state.multinomial(1, self.CR_probabilities)==1)
+        print 'In rank: ',self.rank,' CR_loc: ',CR_loc
         #print 'CR_loc chosen: ',CR_loc
         CR = self.CR_values[CR_loc]
             
         #print 'Selected CR: ',CR
             
         if len(self.DEpairs)>1:
-            DEpair_choice = np.random.randint(1, len(self.DEpairs)+1, size=1)
+            DEpair_choice = self.rand_state.randint(1, len(self.DEpairs)+1, size=1)
         else:
             DEpair_choice = 1
         
+        print 'In rank: ',self.rank,' DE pairs: ',DEpair_choice
         
         if self.snooker == 0 or run_snooker == False:
             #print 'Proposing pts with no snooker update. q0: ',q0,' CR: ',CR
@@ -217,7 +228,7 @@ class Dream_mpi(ArrayStep):
             #Calculate probabilities
             sum_proposal_logps = np.sum(log_ps_sub)
             logp_prob = log_ps_sub/sum_proposal_logps
-            best_logp_loc = np.where(np.random.multinomial(1, logp_prob)==1)[0]
+            best_logp_loc = np.where(self.rand_state.multinomial(1, logp_prob)==1)[0]
             #print 'logps: ',log_ps,'max_logp: ',max_logp,'log_ps_sub: ',log_ps_sub,'sum_proposal_logps: ',sum_proposal_logps,'logp_prob: ',logp_prob,'best_logp_loc: ',best_logp_loc
             q_proposal = np.squeeze(proposed_pts[best_logp_loc])
             #print 'logps proposed = '+str(log_ps)+' Selected logp = '+str(log_ps[best_logp_loc])+' Point = '+str(q_proposal)
@@ -401,10 +412,10 @@ class Dream_mpi(ArrayStep):
             
          
     def set_gamma(self, iteration, DEpairs, snooker_choice, CR, d_prime):
-        gamma_unity_choice = np.where(np.random.multinomial(1, [self.p_gamma_unity, 1-self.p_gamma_unity])==1)
+        gamma_unity_choice = np.where(self.rand_state.multinomial(1, [self.p_gamma_unity, 1-self.p_gamma_unity])==1)
         
         if snooker_choice == True:
-            gamma = np.random.uniform(1.2, 2.2)
+            gamma = self.rand_state.uniform(1.2, 2.2)
             
         elif gamma_unity_choice[0] == 0:
             gamma = 1.0
@@ -428,9 +439,13 @@ class Dream_mpi(ArrayStep):
 
     def sample_from_history(self, nseedchains, DEpairs, ndimensions, snooker=False):
         if snooker is False:
-            chain_num = random.sample(range(self.count+nseedchains), DEpairs*4)
+            limit = self.count + nseedchains - 1
+            chain_num = self.rand_state.random_integers(limit, size=DEpairs*4)
         else:
-            chain_num = random.sample(range(self.count+nseedchains), 1)
+            limit = self.count + nseedchains - 1
+            chain_num = self.rand_state.random_integers(limit, size=1)
+            
+        print 'In rank: ',self.rank,' selected chain #s: ',chain_num
         start_locs = [i*ndimensions for i in chain_num]
         end_locs = [i+ndimensions for i in start_locs]
         sampled_chains = [self.history_arr[start_loc:end_loc] for start_loc, end_loc in zip(start_locs, end_locs)]
@@ -441,14 +456,15 @@ class Dream_mpi(ArrayStep):
         if snooker is False:
             #print 'Generating pts with no snooker update. n proposed pts= ',n_proposed_pts
             sampled_history_pts = np.array([self.sample_from_history(self.nseedchains, DEpairs, self.total_var_dimension) for i in range(n_proposed_pts)])
+    
             #print 'history shape: ',sampled_history_pts.shape           
             chain_differences = np.array([np.sum(sampled_history_pts[i][0:2*DEpairs], axis=0)-np.sum(sampled_history_pts[i][2*DEpairs:DEpairs*4], axis=0) for i in range(len(sampled_history_pts))])
             #print 'chain_differences_shape: ',chain_differences.shape            
             #print 'Generated chain differences with DEpairs>0.  chain differences = ',chain_differences
-            zeta = np.array([np.random.normal(0, self.zeta, self.total_var_dimension) for i in range(n_proposed_pts)])
-            e = np.array([np.random.uniform(-self.lamb, self.lamb, self.total_var_dimension) for i in range(n_proposed_pts)])
+            zeta = np.array([self.rand_state.normal(0, self.zeta, self.total_var_dimension) for i in range(n_proposed_pts)])
+            e = np.array([self.rand_state.uniform(-self.lamb, self.lamb, self.total_var_dimension) for i in range(n_proposed_pts)])
             d_prime = self.total_var_dimension
-            U = np.random.uniform(0, 1, size=chain_differences.shape)
+            U = self.rand_state.uniform(0, 1, size=chain_differences.shape)
             if n_proposed_pts > 1:
                 d_prime = [len(U[point][np.where(U[point]<CR)]) for point in range(n_proposed_pts)]
                 self.gamma = [self.set_gamma(self.iter, DEpairs, snooker, CR, d_p) for d_p in d_prime]
@@ -516,10 +532,12 @@ class Dream_mpi(ArrayStep):
     def record_history(self, nseedchains, ndimensions, q_new):
         if self.rank != 0:
             self.comm.Send(q_new, dest=0, tag=11)
+            
         else:
             pt_to_add = np.zeros(q_new.shape)
             for rank in range(1, self.nchains):
                 self.comm.Recv(pt_to_add, source=rank, tag=11)
+                print 'Adding point: ',pt_to_add,' from rank: ',rank
                 nhistoryrecs = self.count+nseedchains+rank
                 start_loc = nhistoryrecs*ndimensions
                 end_loc = start_loc+ndimensions
@@ -527,6 +545,7 @@ class Dream_mpi(ArrayStep):
             nhistoryrecs = self.count+nseedchains+self.rank
             start_loc = nhistoryrecs*ndimensions
             end_loc = start_loc+ndimensions
+            print 'Adding point: ',q_new,' from rank 0.'
             self.history_arr[start_loc:end_loc] = np.array(q_new).flatten()
         
         self.chain_comm.Barrier()        
