@@ -61,9 +61,11 @@ class Dream(ArrayStep):
         Whether to run multi-try samples in parallel (using multiprocessing).  Default is false.  Irrelevant if multitry is set to False.
     verbose : bool
         Whether to print verbose progress.  Default is false.
+    model_name : str
+        A model name to be used as a prefix when saving history and crossover value files.
     """
     
-    def __init__(self, model=None, variables=None, nseedchains=None, nCR=3, adapt_crossover=True, crossover_burnin=None, DEpairs=1, lamb=.05, zeta=1e-12, history_thin=10, snooker=.10, p_gamma_unity=.20, start_random=True, save_history=True, history_file=False, crossover_file=False, multitry=False, parallel=False, verbose=False,  **kwargs):
+    def __init__(self, model=None, variables=None, nseedchains=None, nCR=3, adapt_crossover=True, crossover_burnin=None, DEpairs=1, lamb=.05, zeta=1e-12, history_thin=10, snooker=.10, p_gamma_unity=.20, start_random=True, save_history=True, history_file=False, crossover_file=False, multitry=False, parallel=False, verbose=False, model_name=False, **kwargs):
         
         model = modelcontext(model)
                 
@@ -74,13 +76,21 @@ class Dream(ArrayStep):
             raise Exception('The implemented version of Dream should only be run on continuous variables.')
         
         self.model = model
+        self.model_name = model_name
         self.variables = variables
         self.nseedchains = nseedchains
         self.nCR = nCR
-        self.adapt_crossover = adapt_crossover
         self.crossover_burnin = crossover_burnin
         self.crossover_file = crossover_file
-        self.CR_probabilities = [1/float(self.nCR) for i in range(self.nCR)]
+        if crossover_file:
+            self.CR_probabilities = np.load(crossover_file)
+            if adapt_crossover:
+                print 'Warning: Crossover values loaded but adapt_crossover = True.  Overrode adapt_crossover input and not adapting crossover values.'
+                self.adapt_crossover = False
+        else:
+            self.CR_probabilities = [1/float(self.nCR) for i in range(self.nCR)]
+            self.adapt_crossover = adapt_crossover
+            
         self.CR_values = np.array([m/float(self.nCR) for m in range(1, self.nCR+1)])        
         self.DEpairs = np.linspace(1, DEpairs, num=DEpairs) #This is delta in original Matlab code
         self.snooker = snooker
@@ -101,8 +111,8 @@ class Dream(ArrayStep):
             self.total_var_dimension += var_name.dsize
         if self.nseedchains == None:
             self.nseedchains = self.total_var_dimension*10
-        gamma_array = np.zeros((self.total_var_dimension, self.DEpairs))
-        for delta in range(1, self.DEpairs+1):
+        gamma_array = np.zeros((self.total_var_dimension, DEpairs))
+        for delta in range(1, DEpairs+1):
             gamma_array[:,delta-1] = np.array([2.38 / np.sqrt(2*delta*np.linspace(1, self.total_var_dimension, num=self.total_var_dimension))])
         self.gamma_arr = gamma_array
         self.gamma = None
@@ -143,14 +153,7 @@ class Dream(ArrayStep):
                             print 'History file loaded.'
                     if self.verbose:
                         print 'Setting crossover probability starting values.'
-                    with Dream_shared_vars.cross_probs.get_lock():
-                        if not self.crossover_file:
-                            starting_cross_probs = np.array([1/(float(self.nCR)) for i in range(self.nCR)])
-                            Dream_shared_vars.cross_probs[0:self.nCR] = starting_cross_probs
-                        else:
-                            self.CR_probabilities = Dream_shared_vars.cross_probs[0:self.nCR]
-                        if self.verbose:
-                            print 'set prob of different crossover values to: ',Dream_shared_vars.cross_probs[0:self.nCR+1]
+                        print 'set prob of different crossover values to: ',self.CR_probabilities
                         Dream_shared_vars.history_seeded.value = 'T'
                     if self.start_random:
                         if self.verbose:
@@ -167,77 +170,43 @@ class Dream(ArrayStep):
                 raise Exception('Dream should be run with multiple chains in parallel.  Set njobs > 1.')          
         
         try:
+
             #Determine whether to run snooker update or not for this iteration.
-            if self.snooker != 0:
-                snooker_choice = np.where(np.random.multinomial(1, [self.snooker, 1-self.snooker])==1)
-                
-                if snooker_choice[0] == 0:
-                    run_snooker = True
-                else:
-                    run_snooker = False
-            else:
-                run_snooker = False
-        
-
-            #Set CR value for generating proposal point
-            CR_loc = np.where(np.random.multinomial(1, self.CR_probabilities)==1)
-
-            CR = self.CR_values[CR_loc]
+            run_snooker = self.set_snooker()
+    
+            #Set crossover value for generating proposal point
+            CR = self.set_CR(self.CR_probabilities, self.CR_values)
             
             #Set DE pair choice to be used for generating proposal point for this iteration.
-            if len(self.DEpairs)>1:
-                DEpair_choice = np.random.randint(1, len(self.DEpairs)+1, size=1)
-            else:
-                DEpair_choice = 1
+            DEpair_choice = self.set_DEpair(self.DEpairs)
         
             with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
                 #Generate proposal points
-                if self.snooker == 0 or run_snooker == False:
+                if run_snooker == False:
                     proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=False)
 
                 else:
                     proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)
         
+            #Evaluate logp(s)
             if self.multitry == 1:
                 q_logp = logp(np.squeeze(proposed_pts))
                 q = np.squeeze(proposed_pts)
             else:
                 #mp.log_to_stderr(logging.DEBUG)
-                #If using multi-try and running in parallel farm out proposed points to process pool.
-                if self.parallel:
-                    p = mp.Pool(self.multitry)
-                    args = zip([self]*self.multitry, np.squeeze(proposed_pts), [all_vars_point]*self.multitry)
-                    log_ps = p.map(call_logp, args)
-                    p.close()
-                    p.join()
-                else:
-                    log_ps = []
-                    for pt in np.squeeze(proposed_pts):
-                        log_ps.append(logp(pt))
-                        
+                
+                log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
+                
                 #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
                 while np.all(np.isfinite(np.array(log_ps))==False):
                     if run_snooker is True:
                         proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
                     else:
                         proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
-                    log_ps = []
-                    for pt in np.squeeze(proposed_pts):
-                        log_ps.append(logp(pt))
-
-                log_ps = np.array(log_ps)
-                
-                #Substract largest logp from all logps (this from original Matlab code)
-                max_logp = np.amax(log_ps)
-                log_ps_sub = np.exp(log_ps - max_logp)
-                
-                #Calculate probabilities
-                sum_proposal_logps = np.sum(log_ps_sub)
-                logp_prob = log_ps_sub/sum_proposal_logps
-                best_logp_loc = np.where(np.random.multinomial(1, logp_prob)==1)[0]
-
-                #Randomly select one of the tested points with probability proportional to the probability density at the point
-                q_proposal = np.squeeze(proposed_pts[best_logp_loc])
+                        
+                    log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
+                    
+                q_proposal, q_logp = self.mt_choose_proposal_pt(log_ps, proposed_pts)
             
                 #Draw reference points around the randomly selected proposal point
                 with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
@@ -247,26 +216,12 @@ class Dream(ArrayStep):
                         reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
             
                 #Compute posterior density at reference points.
-                if self.multitry > 2:
-                    if self.parallel:
-                        p = mp.Pool(self.multitry-1)
-                        args = zip([self]*(self.multitry-1), np.squeeze(reference_pts), [all_vars_point]*(self.multitry-1))
-                        ref_log_ps = p.map(call_logp, args)
-                        p.close()
-                        p.join()
-                    else:
-                        ref_log_ps = []
-                        for pt in np.squeeze(reference_pts):
-                            ref_log_ps.append(logp(pt))
-                else:
-                    ref_log_ps = np.array([logp(np.squeeze(reference_pts))])
-        
+                ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, logp, all_vars_point, ref=True)
+                
             if self.last_logp == None:
                 self.last_logp = logp(q0)
         
             if self.multitry > 1:
-                ref_log_ps = np.append(ref_log_ps, self.last_logp)
-
                 if run_snooker is True:
                     total_proposal_logp = log_ps + snooker_logp_prop
                     #Goal is to determine the ratio =  p(y) * p(y --> X) / p(Xref) * p(Xref --> X) where y = proposal point, X = current point, and Xref = reference point
@@ -288,7 +243,7 @@ class Dream(ArrayStep):
                 weight_reference = np.amax(np.exp(total_reference_logp - max_logp))
                 
                 q_new = metrop_select(weight_proposed - weight_reference, q_proposal, q0)
-                q_logp = logp(q_proposal)   
+                
             else:  
                 if run_snooker is True:
                     total_proposed_logp = q_logp + snooker_logp_prop
@@ -299,29 +254,24 @@ class Dream(ArrayStep):
                 else:
                     q_new = metrop_select(q_logp - self.last_logp, q, q0) 
                     
-            if np.array_equal(q0, q_new):
-                print 'Ratio: ',q_logp-self.last_logp,' Tested logp: ',q_logp,' and did not accept point.  Old logp: ',self.last_logp
-                    
-            else:
-                print 'Ratio: ',q_logp-self.last_logp,' Tested logp: ',q_logp,' and accepted point.  Old logp: ',self.last_logp
+            if not np.array_equal(q0, q_new):
                 self.last_logp = q_logp
-                    
         
             #Place new point in history given history thinning rate
             if self.iter % self.history_thin == 0:
                 with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.current_positions.get_lock():
                     self.record_history(self.nseedchains, self.total_var_dimension, q_new, self.len_history)
         
-            #IF adapting crossover values, estimate ideal crossover probabilities for each dimension during burn-in.
+            #If adapting crossover values, estimate ideal crossover probabilities for each dimension during burn-in.
             #Don't do this for the first 10 iterations to give all chains a chance to fill in the shared current position array
             #Don't count iterations where gamma was set to 1 in crossover adaptation calculations
             if self.adapt_crossover is True and self.iter > 10 and self.iter < self.crossover_burnin and np.any(np.array(self.gamma)==1.0) != True:
                 with Dream_shared_vars.cross_probs.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.ncr_updates.get_lock() and Dream_shared_vars.current_positions.get_lock() and Dream_shared_vars.delta_m.get_lock():
                     #If a snooker update was run, then regardless of the originally selected CR, a CR=1.0 was used.
                     if run_snooker is False:
-                        self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, q0, q_new, CR) 
+                        self.CR_probabilities = self.estimate_crossover_probabilities(self.total_var_dimension, q0, q_new, CR) 
                     else:
-                        self.CR_probabilities = self.estimate_crossover_probabilities(self.iter, self.total_var_dimension, q0, q_new, CR=1) 
+                        self.CR_probabilities = self.estimate_crossover_probabilities(self.total_var_dimension, q0, q_new, CR=1) 
         
             self.iter += 1
         except Exception as e:
@@ -330,7 +280,7 @@ class Dream(ArrayStep):
             raise e
         return q_new
     
-    def estimate_crossover_probabilities(self, iteration, ndim, q0, q_new, CR):
+    def estimate_crossover_probabilities(self, ndim, q0, q_new, CR):
         """Adapt crossover probabilities during crossover burn-in period."""
         
         cross_probs = Dream_shared_vars.cross_probs[0:self.nCR]   
@@ -346,13 +296,17 @@ class Dream(ArrayStep):
         
         #Compute squared normalized jumping distance
         m_loc = np.where(self.CR_values == CR)[0]
+        print 'm loc: ',m_loc
         Dream_shared_vars.ncr_updates[m_loc] += 1
+        
         Dream_shared_vars.delta_m[m_loc] = Dream_shared_vars.delta_m[m_loc] + np.nan_to_num(np.sum((q_new - q0)**2/sd_by_dim**2))
         
         #Update probabilities of tested crossover value        
         #Leave probabilities unchanged until all possible crossover values have had at least one successful move so that a given value's probability isn't prematurely set to 0, preventing further testing.
         delta_ms = np.array(Dream_shared_vars.delta_m[0:self.nCR])
+        print 'delta m: ',delta_ms
         ncr_updates = np.array(Dream_shared_vars.ncr_updates[0:self.nCR])
+        print 'ncr updates: ',ncr_updates
         sum_delta_m_per_iter = np.sum(delta_ms/ncr_updates)
         
         if np.all(delta_ms != 0) == True:
@@ -365,8 +319,39 @@ class Dream(ArrayStep):
         self.CR_probabilities = cross_probs
         
         return cross_probs
-         
-    def set_gamma(self, iteration, DEpairs, snooker_choice, CR, d_prime):
+    
+    def set_snooker(self):
+        """Choose to run a snooker update on a given iteration or not."""
+        if self.snooker != 0:
+            snooker_choice = np.where(np.random.multinomial(1, [self.snooker, 1-self.snooker])==1)
+                
+            if snooker_choice[0] == 0:
+                run_snooker = True
+            else:
+                run_snooker = False
+        else:
+            run_snooker = False
+            
+        return run_snooker
+    
+    def set_CR(self, CR_probs, CR_vals):
+        """Select crossover value for a given iteration."""
+        CR_loc = np.where(np.random.multinomial(1, CR_probs)==1)
+
+        CR = CR_vals[CR_loc]
+        
+        return CR
+    
+    def set_DEpair(self, DEpairs):
+        """Select the number of pairs of chains to be used for creating the next proposal point for a given iteration."""
+        if len(DEpairs)>1:
+            DEpair_choice = np.random.randint(1, len(DEpairs)+1, size=1)
+        else:
+            DEpair_choice = 1
+        
+        return DEpair_choice
+    
+    def set_gamma(self, iteration, DEpairs, snooker_choice, d_prime):
         """Select gamma value for a given iteration."""
         
         gamma_unity_choice = np.where(np.random.multinomial(1, [self.p_gamma_unity, 1-self.p_gamma_unity])==1)
@@ -397,7 +382,6 @@ class Dream(ArrayStep):
 
     def sample_from_history(self, nseedchains, DEpairs, ndimensions, snooker=False):
         """Draw random point from the history array."""
-        
         if snooker is False:
             chain_num = random.sample(range(Dream_shared_vars.count.value+nseedchains), DEpairs*4)
         else:
@@ -418,18 +402,20 @@ class Dream(ArrayStep):
             chain_differences = np.array([np.sum(sampled_history_pts[i][0:2*DEpairs], axis=0)-np.sum(sampled_history_pts[i][2*DEpairs:DEpairs*4], axis=0) for i in range(len(sampled_history_pts))])
 
             zeta = np.array([np.random.normal(0, self.zeta, self.total_var_dimension) for i in range(n_proposed_pts)])
+
             e = np.array([np.random.uniform(-self.lamb, self.lamb, self.total_var_dimension) for i in range(n_proposed_pts)])
+
             d_prime = self.total_var_dimension
             U = np.random.uniform(0, 1, size=chain_differences.shape)
             
             #Select gamma values given number of parameter dimensions to be changed (d_prime).
             if n_proposed_pts > 1:
                 d_prime = [len(U[point][np.where(U[point]<CR)]) for point in range(n_proposed_pts)]
-                self.gamma = [self.set_gamma(self.iter, DEpairs, snooker, CR, d_p) for d_p in d_prime]
+                self.gamma = [self.set_gamma(self.iter, DEpairs, snooker, d_p) for d_p in d_prime]
 
             else:
                 d_prime = len(U[np.where(U<CR)])
-                self.gamma = self.set_gamma(self.iter, DEpairs, snooker, CR, d_prime)
+                self.gamma = self.set_gamma(self.iter, DEpairs, snooker, d_prime)
             
             #Generate proposed points given gamma values.
             if n_proposed_pts > 1:
@@ -448,7 +434,7 @@ class Dream(ArrayStep):
         
         else:
             #With a snooker update all CR always equals 1 (i.e. all parameter dimensions are changed).
-            self.gamma = self.set_gamma(self.iter, DEpairs, snooker, CR, self.total_var_dimension)
+            self.gamma = self.set_gamma(self.iter, DEpairs, snooker, self.total_var_dimension)
             proposed_pts, snooker_logp, z = self.snooker_update(n_proposed_pts, q0)
         
         if snooker is False:
@@ -487,13 +473,54 @@ class Dream(ArrayStep):
         
         return proposed_pts, snooker_logp, sampled_history_pt
     
+    def mt_evaluate_logps(self, parallel, multitry, proposed_pts, logp, all_vars_pt, ref=False):
+        """Evaluate the log probability for multiple points in serial or parallel when using multi-try."""
+        #If using multi-try and running in parallel farm out proposed points to process pool.
+        if parallel:
+            p = mp.Pool(multitry)
+            args = zip([self]*multitry, np.squeeze(proposed_pts), [all_vars_pt]*multitry)
+            log_ps = p.map(call_logp, args)
+            p.close()
+            p.join()
+        else:
+            log_ps = []
+            if multitry == 2:
+                log_ps = np.array([logp(np.squeeze(proposed_pts))])
+            else:
+                for pt in np.squeeze(proposed_pts):
+                    log_ps.append(logp(pt))        
+        
+        log_ps = np.array(log_ps)        
+        
+        if ref:
+            log_ps = np.append(log_ps, self.last_logp)
+            
+        return log_ps
+
+    def mt_choose_proposal_pt(self, log_ps, proposed_pts):
+        """Select a proposed point with probability proportional to the probability density at that point."""
+        
+        #Substract largest logp from all logps (this from original Matlab code)
+        max_logp = np.amax(log_ps)
+        log_ps_sub = np.exp(log_ps - max_logp)
+                
+        #Calculate probabilities
+        sum_proposal_logps = np.sum(log_ps_sub)
+        logp_prob = log_ps_sub/sum_proposal_logps
+        best_logp_loc = np.where(np.random.multinomial(1, logp_prob)==1)[0]
+
+        #Randomly select one of the tested points with probability proportional to the probability density at the point
+        q_proposal = np.squeeze(proposed_pts[best_logp_loc])
+        q_logp = log_ps[best_logp_loc]        
+        
+        return q_proposal, q_logp
+        
     def record_history(self, nseedchains, ndimensions, q_new, len_history):
         """Record accepted point in history."""
         
         nhistoryrecs = Dream_shared_vars.count.value+nseedchains
         start_loc = nhistoryrecs*ndimensions
         end_loc = start_loc+ndimensions
-
         Dream_shared_vars.history[start_loc:end_loc] = np.array(q_new).flatten()
 
         if self.chain_n is None:
@@ -509,8 +536,11 @@ class Dream(ArrayStep):
 
         Dream_shared_vars.count.value += 1
         if self.save_history and len_history == (nhistoryrecs+1)*ndimensions:
-            date_time_str = datetime.now().strftime('%Y_%m_%d_%H:%M:%S')+'_'
-            self.save_history_to_disc(np.frombuffer(Dream_shared_vars.history.get_obj()), date_time_str)
+            if not self.model_name:
+                prefix = datetime.now().strftime('%Y_%m_%d_%H:%M:%S')+'_'
+            else:
+                prefix = self.model_name+'_'
+            self.save_history_to_disc(np.frombuffer(Dream_shared_vars.history.get_obj()), prefix)
             
     def save_history_to_disc(self, history, prefix):
         """Save history and crossover probabilities to files at end of run."""
