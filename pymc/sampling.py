@@ -78,16 +78,28 @@ def sample(draws, step, start=None, trace=None, chain=0, njobs=1, tune=None,
         chains = list(range(chain, chain + njobs))
 
         pbars = [progressbar] + [False] * (njobs - 1)
-
-        argset = zip([draws] * njobs,
+        
+        if isinstance(start, list):
+             argset = zip([draws] * njobs,
                      [step] * njobs,
-                     [start] * njobs,
+                     start,
                      [trace] * njobs,
                      chains,
                      [tune] * njobs,
                      pbars,
                      [model] * njobs,
-                     random_seeds)
+                     random_seeds)   
+        else:
+            argset = zip([draws] * njobs,
+                         [step] * njobs,
+                         [start] * njobs,
+                         [trace] * njobs,
+                         chains,
+                         [tune] * njobs,
+                         pbars,
+                         [model] * njobs,
+                         random_seeds)
+        
         if not mpi_avail or use_mpi==False:
             sample_func = _mp_sample
             sample_args = [njobs, argset]
