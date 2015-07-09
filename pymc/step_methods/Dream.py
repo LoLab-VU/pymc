@@ -187,7 +187,10 @@ class Dream(ArrayStep):
 
                 else:
                     proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)
-        
+            
+            if self.last_logp == None:
+                self.last_logp = logp(q0)            
+            
             #Evaluate logp(s)
             if self.multitry == 1:
                 q_logp = logp(np.squeeze(proposed_pts))
@@ -218,8 +221,6 @@ class Dream(ArrayStep):
                 #Compute posterior density at reference points.
                 ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, logp, all_vars_point, ref=True)
                 
-            if self.last_logp == None:
-                self.last_logp = logp(q0)
         
             if self.multitry > 1:
                 if run_snooker is True:
@@ -238,6 +239,8 @@ class Dream(ArrayStep):
                 #Determine max logp for all proposed and reference points
                 max_logp = np.amax(np.concatenate((total_proposal_logp, total_reference_logp)))
                 
+                print 'total ref logp: ',total_reference_logp
+                print 'max logp: ',max_logp
                 #Calculate weights for proposed points
                 weight_proposed = np.amax(np.exp(total_proposal_logp - max_logp))
                 weight_reference = np.amax(np.exp(total_reference_logp - max_logp))
