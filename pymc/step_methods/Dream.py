@@ -147,14 +147,13 @@ class Dream(ArrayStep):
                                 start_loc = i*self.total_var_dimension
                                 end_loc = start_loc+self.total_var_dimension
                                 Dream_shared_vars.history[start_loc:end_loc] = self.draw_from_prior(self.model, self.variables)
- 
+                            Dream_shared_vars.history_seeded.value = 'T'
                     else:
                         if self.verbose:
                             print 'History file loaded.'
                     if self.verbose:
                         print 'Setting crossover probability starting values.'
                         print 'set prob of different crossover values to: ',self.CR_probabilities
-                        Dream_shared_vars.history_seeded.value = 'T'
                     if self.start_random:
                         if self.verbose:
                             print 'Setting start to random draw from prior.'
@@ -239,8 +238,6 @@ class Dream(ArrayStep):
                 #Determine max logp for all proposed and reference points
                 max_logp = np.amax(np.concatenate((total_proposal_logp, total_reference_logp)))
                 
-                print 'total ref logp: ',total_reference_logp
-                print 'max logp: ',max_logp
                 #Calculate weights for proposed points
                 weight_proposed = np.amax(np.exp(total_proposal_logp - max_logp))
                 weight_reference = np.amax(np.exp(total_reference_logp - max_logp))
@@ -258,7 +255,11 @@ class Dream(ArrayStep):
                     q_new = metrop_select(q_logp - self.last_logp, q, q0) 
                     
             if not np.array_equal(q0, q_new):
+                #print 'Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp
                 self.last_logp = q_logp
+            #else:
+                #print 'Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp
+                
         
             #Place new point in history given history thinning rate
             if self.iter % self.history_thin == 0:
@@ -307,9 +308,7 @@ class Dream(ArrayStep):
         #Update probabilities of tested crossover value        
         #Leave probabilities unchanged until all possible crossover values have had at least one successful move so that a given value's probability isn't prematurely set to 0, preventing further testing.
         delta_ms = np.array(Dream_shared_vars.delta_m[0:self.nCR])
-        print 'delta m: ',delta_ms
         ncr_updates = np.array(Dream_shared_vars.ncr_updates[0:self.nCR])
-        print 'ncr updates: ',ncr_updates
         sum_delta_m_per_iter = np.sum(delta_ms/ncr_updates)
         
         if np.all(delta_ms != 0) == True:
@@ -407,6 +406,7 @@ class Dream(ArrayStep):
             zeta = np.array([np.random.normal(0, self.zeta, self.total_var_dimension) for i in range(n_proposed_pts)])
 
             e = np.array([np.random.uniform(-self.lamb, self.lamb, self.total_var_dimension) for i in range(n_proposed_pts)])
+            e = e+1
 
             d_prime = self.total_var_dimension
             U = np.random.uniform(0, 1, size=chain_differences.shape)
@@ -524,7 +524,7 @@ class Dream(ArrayStep):
         nhistoryrecs = Dream_shared_vars.count.value+nseedchains
         start_loc = nhistoryrecs*ndimensions
         end_loc = start_loc+ndimensions
-        Dream_shared_vars.history[start_loc:end_loc] = np.array(q_new).flatten()
+        Dream_shared_vars.history[start_loc:end_loc] = np.array(q_new).flatten()      
 
         if self.chain_n is None:
             with Dream_shared_vars.nchains.get_lock():
