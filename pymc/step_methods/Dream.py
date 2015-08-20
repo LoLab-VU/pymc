@@ -255,10 +255,10 @@ class Dream(ArrayStep):
                     q_new = metrop_select(q_logp - self.last_logp, q, q0) 
                     
             if not np.array_equal(q0, q_new):
-                print 'Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp
+                #print 'Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp
                 self.last_logp = q_logp
-            else:
-                print 'Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp
+            #else:
+                #print 'Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp
                 
         
             #Place new point in history given history thinning rate
