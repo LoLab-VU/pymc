@@ -217,14 +217,26 @@ class Dream(ArrayStep):
                 
                 log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
                 
-                #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
-                while np.all(np.isfinite(np.array(log_ps))==False):
-                    if run_snooker:
-                        proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
-                    else:
-                        proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
-                        
+                #If any log_ps are -inf, redraw points                
+                while np.any(log_ps == -np.inf):
+                    with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
+                        #Generate proposal points
+                        if not run_snooker:
+                            proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=False)
+                    
+                        else:
+                            proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)   
+                            
                     log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
+                    
+#                #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
+#                while np.all(np.isfinite(np.array(log_ps))==False):
+#                    if run_snooker:
+#                        proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
+#                    else:
+#                        proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
+#                        
+#                    log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
                     
                 q_proposal, q_logp = self.mt_choose_proposal_pt(log_ps, proposed_pts)
             
@@ -238,6 +250,15 @@ class Dream(ArrayStep):
                 #Compute posterior density at reference points.
                 ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, logp, all_vars_point, ref=True)
                 
+                #If any reference logps are -inf, redraw
+                while np.any(ref_log_ps == -np.inf):
+                    with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
+                        if run_snooker:
+                            reference_pts, snooker_logp_ref, z_ref = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
+                        else:
+                            reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
+                            
+                    ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, logp, all_vars_point, ref=True)
         
             if self.multitry > 1:
                 if run_snooker:
@@ -254,23 +275,9 @@ class Dream(ArrayStep):
                     total_reference_logp = ref_log_ps
                 
                 #Determine max logp for all proposed and reference points
-                #print 'all logps: ',np.concatenate((total_proposal_logp, total_reference_logp))
                 max_logp = np.amax(np.concatenate((total_proposal_logp, total_reference_logp)))
-                #print 'max logP : ',max_logp
-                #min_logp = np.amin(np.concatenate((total_proposal_logp, total_reference_logp)))                
-                #print 'min logP : ',min_logp
-                #Calculate weights for proposed points
-                #print 'proposed exp: ',np.exp(total_proposal_logp - max_logp)
                 weight_proposed = total_proposal_logp - max_logp
-                #weight_proposed = np.log10(np.nan_to_num(np.abs(min_logp)+total_proposal_logp+1))
-                #print 'weight proposed: ',weight_proposed
-                #print 'sum weight proposed: ',np.sum(weight_proposed)
-                #print 'ref exp: ',total_reference_logp - max_logp
-                weight_reference = total_reference_logp - max_logp
-                #weight_reference = np.log10(np.nan_to_num(np.abs(min_logp)+total_reference_logp+1))
-                #print 'weight reference: ',weight_reference
-                #print 'sum weight reference: ',np.sum(weight_reference)
-                
+                weight_reference = total_reference_logp - max_logp                
                 q_new = metrop_select(np.nan_to_num(np.sum(weight_proposed))-np.nan_to_num(np.sum(weight_reference)), q_proposal, q0)
                 
             else:  
@@ -438,9 +445,6 @@ class Dream(ArrayStep):
             if n_proposed_pts > 1:
                 d_prime = [len(U[point][np.where(U[point]<CR)]) for point in range(n_proposed_pts)]
                 self.gamma = [self.set_gamma(self.iter, DEpairs, snooker, d_p) for d_p in d_prime]
-                #print 'CR: ',CR
-                #print 'd_prime: ',d_prime
-                #print 'total var dim: ',self.total_var_dimension
                 
             else:
                 d_prime = len(U[np.where(U<CR)])
@@ -457,8 +461,7 @@ class Dream(ArrayStep):
                 if n_proposed_pts > 1:
                     for point, pt_num in zip(proposed_pts, range(n_proposed_pts)):
                         proposed_pts[pt_num][np.where(U[pt_num]>CR)] = q0[np.where(U[pt_num]>CR)]
-                    #print 'd prime does not equal total var dim.  Crossing over.'
-                    #print 'proposed points after crossover: ',proposed_pts
+
                 else:
                     proposed_pts[np.where(U>CR)] = q0[np.where(U>CR)[1]] 
         
@@ -485,13 +488,8 @@ class Dream(ArrayStep):
                    
            else:
                masked_point = np.squeeze(proposed_pts)[self.boundary_mask]
-               #print 'point before reflection: ',proposed_pts
-               #print 'self.mins: ',self.mins
-               #print 'self.maxs: ',self.maxs
                x_lower = masked_point < self.mins
-               #print 'x_lower: ',x_lower
                x_upper = masked_point > self.maxs
-               #print 'x_upper: ',x_upper
                masked_point[x_lower] = 2 * self.mins[x_lower] - masked_point[x_lower]
                masked_point[x_upper] = 2 * self.maxs[x_upper] - masked_point[x_upper]
                #Occasionally reflection will result in points still outside of boundaries
@@ -503,10 +501,7 @@ class Dream(ArrayStep):
                    proposed_pts[0][self.boundary_mask] = masked_point
                else:
                    proposed_pts[self.boundary_mask] = masked_point
-               #print 'proposed points[boundary mask]: ',masked_point
-               #print 'self.mins[x_lower]: ',self.mins[x_lower]
-               #print 'proposed points[bound][low]: ',masked_point[x_lower]
-               #print 'point after reflection: ',proposed_pts
+               
         if not snooker:
             return proposed_pts
         else:
