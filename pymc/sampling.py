@@ -254,9 +254,15 @@ def mp_dream_pool(njobs, args):
         len_old_history = len(old_history.flatten())
         nold_history_records = len_old_history/step_method.total_var_dimension
         step_method.nseedchains = nold_history_records
-        arr_dim = np.floor((((njobs*args[0][0])*step_method.total_var_dimension)/step_method.history_thin))+len_old_history
+        if args[0][0] < step_method.history_thin:
+            arr_dim = ((np.floor(njobs*args[0][0]/step_method.history_thin)+njobs)*step_method.total_var_dimension)+len_old_history
+        else:
+            arr_dim = np.floor((((njobs*args[0][0])*step_method.total_var_dimension)/step_method.history_thin))+len_old_history
     else:
-        arr_dim = np.floor(((njobs*args[0][0]*step_method.total_var_dimension)/step_method.history_thin))+(step_method.nseedchains*step_method.total_var_dimension)
+        if args[0][0] < step_method.history_thin:
+            arr_dim = ((np.floor(njobs*args[0][0]/step_method.history_thin)+njobs)*step_method.total_var_dimension)+(step_method.nseedchains*step_method.total_var_dimension)
+        else:
+            arr_dim = np.floor(((njobs*args[0][0]*step_method.total_var_dimension)/step_method.history_thin))+(step_method.nseedchains*step_method.total_var_dimension)
     min_nseedchains = 2*len(step_method.DEpairs)*njobs
     if step_method.nseedchains < min_nseedchains:
         raise Exception('The size of the seeded starting history is insufficient.  Increase nseedchains>=%s.' %str(min_nseedchains))
