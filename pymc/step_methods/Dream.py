@@ -324,7 +324,6 @@ class Dream(ArrayStep):
         """Adapt crossover probabilities during crossover burn-in period."""
         
         cross_probs = Dream_shared_vars.cross_probs[0:self.nCR]   
-        
         current_positions = np.frombuffer(Dream_shared_vars.current_positions.get_obj())
         nchains = len(current_positions)/ndim
 

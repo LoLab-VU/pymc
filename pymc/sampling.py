@@ -271,13 +271,8 @@ def mp_dream_pool(njobs, args):
     if step_method.history_file != False:
         history_arr[0:len_old_history] = old_history.flatten()
     nCR = step_method.nCR
-    if step_method.crossover_file != False:
-        fitted_crossover = np.load(step_method.crossover_file)
-        crossover_probabilities = mp.Array('d', fitted_crossover)
-        step_method.adapt_crossover = False
-    else:
-        crossover_probabilities = mp.Array('d', [0]*nCR)
-       
+    crossover_setting = step_method.CR_probabilities
+    crossover_probabilities = mp.Array('d', crossover_setting)   
     ncrossover_updates = mp.Array('d', [0]*nCR)
     delta_m = mp.Array('d', [0]*nCR)
     current_position_arr = mp.Array('d', [0]*current_position_dim)
