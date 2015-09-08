@@ -291,10 +291,10 @@ class Dream(ArrayStep):
                     q_new = metrop_select(np.nan_to_num(q_logp) - np.nan_to_num(self.last_logp), q, q0) 
                     
             if not np.array_equal(q0, q_new):
-                print 'Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp#,' weight proposed: ',weight_proposed,' weight ref: ',weight_reference
+                print 'Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp#,' weight proposed: ',total_proposal_logp,' weight ref: ',total_reference_logp
                 self.last_logp = q_logp
             else:
-                print 'Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp#,' weight proposed: ',weight_proposed,' weight ref: ',weight_reference
+                print 'Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp#,' weight proposed: ',total_proposal_logp,' weight ref: ',total_reference_logp
                 
         
             #Place new point in history given history thinning rate
@@ -419,7 +419,8 @@ class Dream(ArrayStep):
     def sample_from_history(self, nseedchains, DEpairs, ndimensions, snooker=False):
         """Draw random point from the history array."""
         if not snooker:
-            chain_num = random.sample(range(Dream_shared_vars.count.value+nseedchains), DEpairs*4)
+            #chain_num = random.sample(range(Dream_shared_vars.count.value+nseedchains), DEpairs*4)
+            chain_num = random.sample(range(Dream_shared_vars.count.value+nseedchains), DEpairs*2)
         else:
             chain_num = random.sample(range(Dream_shared_vars.count.value+nseedchains), 1)
         start_locs = [i*ndimensions for i in chain_num]
@@ -433,17 +434,25 @@ class Dream(ArrayStep):
         if not snooker:
             
             sampled_history_pts = np.array([self.sample_from_history(self.nseedchains, DEpairs, self.total_var_dimension) for i in range(n_proposed_pts)])
-            chain_differences = np.array([np.sum(sampled_history_pts[i][0:2*DEpairs], axis=0)-np.sum(sampled_history_pts[i][2*DEpairs:DEpairs*4], axis=0) for i in range(len(sampled_history_pts))])
-            zeta = np.array([np.random.normal(0, self.zeta, self.total_var_dimension) for i in range(n_proposed_pts)])            
+            #print 'sampled history points: ',sampled_history_pts
+            #chain_differences = np.array([np.sum(sampled_history_pts[i][0:2*DEpairs], axis=0)-np.sum(sampled_history_pts[i][2*DEpairs:DEpairs*4], axis=0) for i in range(len(sampled_history_pts))])
+            chain_differences = np.array([np.sum(sampled_history_pts[i][0:DEpairs], axis=0)-np.sum(sampled_history_pts[i][DEpairs:DEpairs*2], axis=0) for i in range(len(sampled_history_pts))])
+            #print 'chain differences: ',chain_differences
+            zeta = np.array([np.random.normal(0, self.zeta, self.total_var_dimension) for i in range(n_proposed_pts)])
+            #print 'zeta: ',zeta
             e = np.array([np.random.uniform(-self.lamb, self.lamb, self.total_var_dimension) for i in range(n_proposed_pts)])
             e = e+1
+            #print 'e: ',e
             d_prime = self.total_var_dimension
             U = np.random.uniform(0, 1, size=chain_differences.shape)
+            #print 'U: ',U
             
             #Select gamma values given number of parameter dimensions to be changed (d_prime).
             if n_proposed_pts > 1:
                 d_prime = [len(U[point][np.where(U[point]<CR)]) for point in range(n_proposed_pts)]
+                #print 'd_prime: ',d_prime
                 self.gamma = [self.set_gamma(self.iter, DEpairs, snooker, d_p) for d_p in d_prime]
+                #print 'gamma: ',self.gamma
                 
             else:
                 d_prime = len(U[np.where(U<CR)])
@@ -452,6 +461,7 @@ class Dream(ArrayStep):
             #Generate proposed points given gamma values.
             if n_proposed_pts > 1:
                 proposed_pts = [q0 + e[point]*gamma*chain_differences[point] + zeta[point] for point, gamma in zip(range(n_proposed_pts), self.gamma)]
+                #print 'proposed points: ',proposed_pts
             else:
                 proposed_pts = q0+ e*self.gamma*chain_differences + zeta
 
@@ -460,6 +470,7 @@ class Dream(ArrayStep):
                 if n_proposed_pts > 1:
                     for point, pt_num in zip(proposed_pts, range(n_proposed_pts)):
                         proposed_pts[pt_num][np.where(U[pt_num]>CR)] = q0[np.where(U[pt_num]>CR)]
+                    #print 'proposed points after crossover: ',proposed_pts
 
                 else:
                     proposed_pts[np.where(U>CR)] = q0[np.where(U>CR)[1]] 
@@ -484,6 +495,7 @@ class Dream(ArrayStep):
                    masked_point[x_lower] = self.mins[x_lower] + np.random.rand(len(np.where(x_lower==True)[0])) * (self.maxs[x_lower]-self.mins[x_lower])
                    masked_point[x_upper] = self.mins[x_upper] + np.random.rand(len(np.where(x_upper==True)[0])) * (self.maxs[x_upper]-self.mins[x_upper])
                    proposed_pts[pt_num][self.boundary_mask] = masked_point
+               #print 'proposed points after boundary: ',proposed_pts
                    
            else:
                masked_point = np.squeeze(proposed_pts)[self.boundary_mask]
