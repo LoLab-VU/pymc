@@ -293,7 +293,8 @@ class Dream(ArrayStep):
             if not np.array_equal(q0, q_new):
                 #print 'Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference)
                 self.last_logp = q_logp
-            else:
+
+            #else:
                 #print 'Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference)
                 
         
