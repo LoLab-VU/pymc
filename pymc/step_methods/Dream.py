@@ -217,26 +217,26 @@ class Dream(ArrayStep):
                 
                 log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
                 
-                #If any log_ps are -inf, redraw points                
-                while np.any(log_ps == -np.inf):
-                    with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-                        #Generate proposal points
-                        if not run_snooker:
-                            proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=False)
-                    
-                        else:
-                            proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)   
-                            
-                    log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
-                    
-#                #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
-#                while np.all(np.isfinite(np.array(log_ps))==False):
-#                    if run_snooker:
-#                        proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
-#                    else:
-#                        proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
-#                        
+#                #If any log_ps are -inf, redraw points                
+#                while np.any(log_ps == -np.inf):
+#                    with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
+#                        #Generate proposal points
+#                        if not run_snooker:
+#                            proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=False)
+#                    
+#                        else:
+#                            proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)   
+#                            
 #                    log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
+                    
+                #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
+                while np.all(np.isfinite(np.array(log_ps))==False):
+                    if run_snooker:
+                        proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
+                    else:
+                        proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
+                        
+                    log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
                     
                 q_proposal, q_logp = self.mt_choose_proposal_pt(log_ps, proposed_pts)
             
@@ -250,15 +250,15 @@ class Dream(ArrayStep):
                 #Compute posterior density at reference points.
                 ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, logp, all_vars_point, ref=True)
                 
-                #If any reference logps are -inf, redraw
-                while np.any(ref_log_ps == -np.inf):
-                    with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-                        if run_snooker:
-                            reference_pts, snooker_logp_ref, z_ref = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
-                        else:
-                            reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
-                            
-                    ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, logp, all_vars_point, ref=True)
+#                #If any reference logps are -inf, redraw
+#                while np.any(ref_log_ps == -np.inf):
+#                    with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
+#                        if run_snooker:
+#                            reference_pts, snooker_logp_ref, z_ref = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
+#                        else:
+#                            reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
+#                            
+#                    ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, logp, all_vars_point, ref=True)
         
             if self.multitry > 1:
                 if run_snooker:
@@ -276,9 +276,9 @@ class Dream(ArrayStep):
                 
                 #Determine max logp for all proposed and reference points
                 max_logp = np.amax(np.concatenate((total_proposal_logp, total_reference_logp)))
-                weight_proposed = total_proposal_logp - max_logp
-                weight_reference = total_reference_logp - max_logp                
-                q_new = metrop_select(np.nan_to_num(np.sum(weight_proposed))-np.nan_to_num(np.sum(weight_reference)), q_proposal, q0)
+                weight_proposed = np.exp(total_proposal_logp - max_logp)
+                weight_reference = np.exp(total_reference_logp - max_logp)
+                q_new = metrop_select(np.log(np.sum(weight_proposed)/np.sum(weight_reference)), q_proposal, q0)
                 
             else:  
                 if run_snooker:
@@ -291,16 +291,20 @@ class Dream(ArrayStep):
                     q_new = metrop_select(np.nan_to_num(q_logp) - np.nan_to_num(self.last_logp), q, q0) 
                     
             if not np.array_equal(q0, q_new):
-                print 'Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp#,' weight proposed: ',total_proposal_logp,' weight ref: ',total_reference_logp
+                #print 'Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference)
                 self.last_logp = q_logp
             else:
-                print 'Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp#,' weight proposed: ',total_proposal_logp,' weight ref: ',total_reference_logp
+                #print 'Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference)
                 
         
             #Place new point in history given history thinning rate
             if self.iter % self.history_thin == 0:
-                with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock() and Dream_shared_vars.current_positions.get_lock():
+                with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
                     self.record_history(self.nseedchains, self.total_var_dimension, q_new, self.len_history)
+            
+            if self.iter < self.crossover_burnin:
+                with Dream_shared_vars.current_positions.get_lock():
+                    self.set_current_position_arr(self.total_var_dimension, q_new)
         
             #If adapting crossover values, estimate ideal crossover probabilities for each dimension during burn-in.
             #Don't do this for the first 10 iterations to give all chains a chance to fill in the shared current position array
@@ -319,7 +323,19 @@ class Dream(ArrayStep):
             print()
             raise e
         return q_new
-    
+        
+    def set_current_position_arr(self, ndimensions, q_new):
+        if self.chain_n == None:
+            with Dream_shared_vars.nchains.get_lock():
+                self.chain_n = Dream_shared_vars.nchains.value-1
+                Dream_shared_vars.nchains.value -= 1
+        
+        #We only need to have the current position of all chains for estimating the crossover probabilities during burn-in so don't bother updating after that
+        if self.iter < self.crossover_burnin:
+            start_cp = self.chain_n*ndimensions
+            end_cp = start_cp+ndimensions
+            Dream_shared_vars.current_positions[start_cp:end_cp] = np.array(q_new).flatten()        
+        
     def estimate_crossover_probabilities(self, ndim, q0, q_new, CR):
         """Adapt crossover probabilities during crossover burn-in period."""
         
@@ -329,8 +345,6 @@ class Dream(ArrayStep):
 
         current_positions = current_positions.reshape((nchains, ndim))
 
-        current_positions[self.chain_n] = q_new
-
         sd_by_dim = np.std(current_positions, axis=0)
         
         #Compute squared normalized jumping distance
@@ -338,18 +352,18 @@ class Dream(ArrayStep):
 
         Dream_shared_vars.ncr_updates[m_loc] += 1
         
-        Dream_shared_vars.delta_m[m_loc] = Dream_shared_vars.delta_m[m_loc] + np.nan_to_num(np.sum((q_new - q0)**2/sd_by_dim**2))
+        Dream_shared_vars.delta_m[m_loc] = Dream_shared_vars.delta_m[m_loc] + np.nan_to_num(np.sum(((q_new - q0)/sd_by_dim)**2))
         
         #Update probabilities of tested crossover value        
         #Leave probabilities unchanged until all possible crossover values have had at least one successful move so that a given value's probability isn't prematurely set to 0, preventing further testing.
         delta_ms = np.array(Dream_shared_vars.delta_m[0:self.nCR])
         ncr_updates = np.array(Dream_shared_vars.ncr_updates[0:self.nCR])
-        sum_delta_m_per_iter = np.sum(delta_ms/ncr_updates)
         
         if np.all(delta_ms != 0) == True:
 
             for m in range(self.nCR):
-                cross_probs[m] = (Dream_shared_vars.delta_m[m]/Dream_shared_vars.ncr_updates[m])/sum_delta_m_per_iter
+                cross_probs[m] = (Dream_shared_vars.delta_m[m]/Dream_shared_vars.ncr_updates[m])*nchains
+            cross_probs = cross_probs/np.sum(cross_probs)
         
         Dream_shared_vars.cross_probs[0:self.nCR] = cross_probs
         
@@ -532,7 +546,7 @@ class Dream(ArrayStep):
             D = [np.dot(proj_vec_diff[point], proj_vec_diff[point]) for point in range(len(proj_vec_diff))]
             #Orthogonal projection of chains_to_projected onto projection vector
             diff_chains_to_be_projected = [(chains_to_be_projected[point][0]-chains_to_be_projected[point][1]) for point in range(n_proposed_pts)]       
-            zP = np.nan_to_num(np.array([np.dot(diff_chains_to_be_projected[point], proj_vec_diff[point])/D[point] for point in range(n_proposed_pts)]))          
+            zP = np.nan_to_num(np.array([np.sum(diff_chains_to_be_projected[point]*proj_vec_diff[point])/D[point] for point in range(n_proposed_pts)]))          
             dx = self.gamma*zP
             proposed_pts = [q0 + dx[point] for point in range(n_proposed_pts)]
             snooker_logp = [np.log(np.linalg.norm(proposed_pts[point]-sampled_history_pt[point]))*(self.total_var_dimension-1) for point in range(n_proposed_pts)]
@@ -541,7 +555,7 @@ class Dream(ArrayStep):
 
             #Orthogonal projection of chains_to_projected onto projection vector  
             diff_chains_to_be_projected = chains_to_be_projected[0]-chains_to_be_projected[1]
-            zP = np.nan_to_num(np.array([np.dot(diff_chains_to_be_projected, proj_vec_diff)/D]))
+            zP = np.nan_to_num(np.array([np.sum(diff_chains_to_be_projected*proj_vec_diff)/D]))
             dx = self.gamma*zP
             proposed_pts = q0 + dx
             snooker_logp = np.log(np.linalg.norm(proposed_pts-sampled_history_pt))*(self.total_var_dimension-1)
@@ -586,7 +600,7 @@ class Dream(ArrayStep):
 
         #Randomly select one of the tested points with probability proportional to the probability density at the point
         q_proposal = np.squeeze(proposed_pts[best_logp_loc])
-        q_logp = log_ps[best_logp_loc]        
+        q_logp = log_ps[best_logp_loc]    
         
         return q_proposal, q_logp
         
@@ -597,17 +611,6 @@ class Dream(ArrayStep):
         start_loc = nhistoryrecs*ndimensions
         end_loc = start_loc+ndimensions
         Dream_shared_vars.history[start_loc:end_loc] = np.array(q_new).flatten()      
-
-        if self.chain_n == None:
-            with Dream_shared_vars.nchains.get_lock():
-                self.chain_n = Dream_shared_vars.nchains.value-1
-                Dream_shared_vars.nchains.value -= 1
-        
-        #We only need to have the current position of all chains for estimating the crossover probabilities during burn-in so don't bother updating after that
-        if self.iter < self.crossover_burnin:
-            start_cp = self.chain_n*ndimensions
-            end_cp = start_cp+ndimensions
-            Dream_shared_vars.current_positions[start_cp:end_cp] = np.array(q_new).flatten()
 
         Dream_shared_vars.count.value += 1
         if self.save_history and len_history == (nhistoryrecs+1)*ndimensions:
