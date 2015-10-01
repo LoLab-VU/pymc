@@ -203,7 +203,33 @@ class Dream(ArrayStep):
                     proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=False)
                     
                 else:
-                    proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)                 
+                    proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True) 
+                if self.multitry > 1:
+                    if self.boundaries:
+                        x_lower = np.zeros(np.array(proposed_pts[0]).shape)
+                        x_upper = np.zeros(np.array(proposed_pts[0]).shape)
+                        n = 0
+                        for pt_num in range(self.multitry):
+                            masked_point = proposed_pts[pt_num][self.boundary_mask]
+                            x_lower = masked_point < self.mins
+                            x_upper = masked_point > self.maxs
+                        
+                            while (not np.all(x_lower == 0)) or (not np.all(x_upper == 0)):
+                                n += 1
+                                if run_snooker:
+                                    new_pt, new_snooker_logp_prop, z = self.generate_proposal_points(1, q0, CR, DEpair_choice, snooker=run_snooker)
+                                    proposed_pts[pt_num] = np.squeeze(new_pt)
+                                    snooker_logp_prop[pt_num] = np.squeeze(new_snooker_logp_prop)
+                                else:
+                                    new_pt = self.generate_proposal_points(1, q0, CR, DEpair_choice, snooker=run_snooker)
+                                    proposed_pts[pt_num] = np.squeeze(new_pt)
+                                x_lower = np.zeros(np.array(proposed_pts[0]).shape)
+                                x_upper = np.zeros(np.array(proposed_pts[0]).shape)
+                                masked_point = proposed_pts[pt_num][self.boundary_mask]
+                                x_lower = masked_point < self.mins
+                                x_upper = masked_point > self.maxs
+                        
+                        print n,' draws needed to find proposal points inside bounds.'
                     
             if self.last_logp == None:
                 self.last_logp = logp(q0)            
@@ -214,7 +240,7 @@ class Dream(ArrayStep):
                 q = np.squeeze(proposed_pts)
             else:
                 #mp.log_to_stderr(logging.DEBUG)
-                
+                                    
                 log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
                 
 #                #If any log_ps are -inf, redraw points                
@@ -231,13 +257,40 @@ class Dream(ArrayStep):
                     
                 #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
                 while np.all(np.isfinite(np.array(log_ps))==False):
-                    if run_snooker:
-                        proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
-                    else:
-                        proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
+                    print 'in all infinite loop'
+                    with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
+                        if run_snooker:
+                            proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
+                        else:
+                            proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
+                
+                        if self.multitry > 1:
+                            if self.boundaries:
+                                x_lower = np.zeros(np.array(proposed_pts[0]).shape)
+                                x_upper = np.zeros(np.array(proposed_pts[0]).shape)
+                                n = 0
+                                for pt_num in range(self.multitry):
+                                    masked_point = proposed_pts[pt_num][self.boundary_mask]
+                                    x_lower = masked_point < self.mins
+                                    x_upper = masked_point > self.maxs
                         
-                    log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
-                    
+                                    while (not np.all(x_lower == 0)) or (not np.all(x_upper == 0)):
+                                        n += 1
+                                        if run_snooker:
+                                            new_pt, new_snooker_logp_prop, z = self.generate_proposal_points(1, q0, CR, DEpair_choice, snooker=run_snooker)
+                                            proposed_pts[pt_num] = np.squeeze(new_pt)
+                                            snooker_logp_prop[pt_num] = np.squeeze(new_snooker_logp_prop)
+                                        else:
+                                            new_pt = self.generate_proposal_points(1, q0, CR, DEpair_choice, snooker=run_snooker)
+                                            proposed_pts[pt_num] = np.squeeze(new_pt)
+                                        x_lower = np.zeros(np.array(proposed_pts[0]).shape)
+                                        x_upper = np.zeros(np.array(proposed_pts[0]).shape)
+                                        masked_point = proposed_pts[pt_num][self.boundary_mask]
+                                        x_lower = masked_point < self.mins
+                                        x_upper = masked_point > self.maxs                       
+
+                            print n,' draws needed to find proposal points inside bounds.'
+                
                 q_proposal, q_logp = self.mt_choose_proposal_pt(log_ps, proposed_pts)
             
                 #Draw reference points around the randomly selected proposal point
@@ -246,7 +299,31 @@ class Dream(ArrayStep):
                         reference_pts, snooker_logp_ref, z_ref = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
                     else:
                         reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
-                    
+
+                    if self.multitry > 1:
+                        if self.boundaries:
+                            x_lower = np.zeros(np.array(reference_pts[0]).shape)
+                            x_upper = np.zeros(np.array(reference_pts[0]).shape)
+                            n = 0
+                            for pt_num in range(self.multitry-1):
+                                masked_point = reference_pts[pt_num][self.boundary_mask]
+                                x_lower = masked_point < self.mins
+                                x_upper = masked_point > self.maxs
+                                while (not np.all(x_lower == 0)) or (not np.all(x_upper == 0)):
+                                    n += 1
+                                    if run_snooker:
+                                        new_pt, snooker_logp_ref, z_ref = self.generate_proposal_points(1, q_proposal, CR, DEpair_choice, snooker=run_snooker) 
+                                        reference_pts[pt_num] = np.squeeze(new_pt)
+                                    else:
+                                        new_pt = self.generate_proposal_points(1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
+                                        reference_pts[pt_num] = np.squeeze(new_pt)
+                                    x_lower = np.zeros(np.array(reference_pts[0]).shape)
+                                    x_upper = np.zeros(np.array(reference_pts[0]).shape)
+                                    masked_point = reference_pts[pt_num][self.boundary_mask]
+                                    x_lower = masked_point < self.mins
+                                    x_upper = masked_point > self.maxs  
+                            print n,' draws needed to find reference points inside bounds.'                
+                
                 #Compute posterior density at reference points.
                 ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, logp, all_vars_point, ref=True)
                 
@@ -278,7 +355,7 @@ class Dream(ArrayStep):
                 max_logp = np.amax(np.concatenate((total_proposal_logp, total_reference_logp)))
                 weight_proposed = np.exp(total_proposal_logp - max_logp)
                 weight_reference = np.exp(total_reference_logp - max_logp)
-                q_new = metrop_select(np.log(np.sum(weight_proposed)/np.sum(weight_reference)), q_proposal, q0)
+                q_new = metrop_select(np.log(np.nan_to_num(np.sum(weight_proposed)/np.sum(weight_reference))), q_proposal, q0)
                 
             else:  
                 if run_snooker:
@@ -291,11 +368,11 @@ class Dream(ArrayStep):
                     q_new = metrop_select(np.nan_to_num(q_logp) - np.nan_to_num(self.last_logp), q, q0) 
                     
             if not np.array_equal(q0, q_new):
-                #print 'Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference)
+                print 'Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference)
                 self.last_logp = q_logp
 
-            #else:
-                #print 'Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference)
+            else:
+                print 'Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference)
                 
         
             #Place new point in history given history thinning rate
@@ -496,37 +573,39 @@ class Dream(ArrayStep):
             proposed_pts, snooker_logp, z = self.snooker_update(n_proposed_pts, q0)
 
         #If uniform priors were used, check that proposed points are within bounds and reflect if not.
-        if self.boundaries:
-           if n_proposed_pts > 1:
-               for pt_num in range(n_proposed_pts):
-                   masked_point = proposed_pts[pt_num][self.boundary_mask]
-                   x_lower = masked_point < self.mins
-                   x_upper = masked_point > self.maxs
-                   masked_point[x_lower] = 2 * self.mins[x_lower] - masked_point[x_lower]
-                   masked_point[x_upper] = 2 * self.maxs[x_upper] - masked_point[x_upper]
-                   #Occasionally reflection will result in points still outside of boundaries
-                   x_lower = masked_point < self.mins
-                   x_upper = masked_point > self.maxs
-                   masked_point[x_lower] = self.mins[x_lower] + np.random.rand(len(np.where(x_lower==True)[0])) * (self.maxs[x_lower]-self.mins[x_lower])
-                   masked_point[x_upper] = self.mins[x_upper] + np.random.rand(len(np.where(x_upper==True)[0])) * (self.maxs[x_upper]-self.mins[x_upper])
-                   proposed_pts[pt_num][self.boundary_mask] = masked_point
-               #print 'proposed points after boundary: ',proposed_pts
-                   
-           else:
-               masked_point = np.squeeze(proposed_pts)[self.boundary_mask]
-               x_lower = masked_point < self.mins
-               x_upper = masked_point > self.maxs
-               masked_point[x_lower] = 2 * self.mins[x_lower] - masked_point[x_lower]
-               masked_point[x_upper] = 2 * self.maxs[x_upper] - masked_point[x_upper]
-               #Occasionally reflection will result in points still outside of boundaries
-               x_lower = masked_point < self.mins
-               x_upper = masked_point > self.maxs
-               masked_point[x_lower] = self.mins[x_lower] + np.random.rand(len(np.where(x_lower==True)[0])) * (self.maxs[x_lower]-self.mins[x_lower])
-               masked_point[x_upper] = self.mins[x_upper] + np.random.rand(len(np.where(x_upper==True)[0])) * (self.maxs[x_upper]-self.mins[x_upper])
-               if not snooker:
-                   proposed_pts[0][self.boundary_mask] = masked_point
-               else:
-                   proposed_pts[self.boundary_mask] = masked_point
+#        if self.boundaries:
+#           if n_proposed_pts > 1:
+#               for pt_num in range(n_proposed_pts):
+#                   masked_point = proposed_pts[pt_num][self.boundary_mask]
+#                   x_lower = masked_point < self.mins
+#                   x_upper = masked_point > self.maxs
+#                   while len(x_lower) or len(x_upper):
+#                       p
+#                   masked_point[x_lower] = 2 * self.mins[x_lower] - masked_point[x_lower]
+#                   masked_point[x_upper] = 2 * self.maxs[x_upper] - masked_point[x_upper]
+#                   #Occasionally reflection will result in points still outside of boundaries
+#                   x_lower = masked_point < self.mins
+#                   x_upper = masked_point > self.maxs
+#                   masked_point[x_lower] = self.mins[x_lower] + np.random.rand(len(np.where(x_lower==True)[0])) * (self.maxs[x_lower]-self.mins[x_lower])
+#                   masked_point[x_upper] = self.mins[x_upper] + np.random.rand(len(np.where(x_upper==True)[0])) * (self.maxs[x_upper]-self.mins[x_upper])
+#                   proposed_pts[pt_num][self.boundary_mask] = masked_point
+#               #print 'proposed points after boundary: ',proposed_pts
+#                   
+#           else:
+#               masked_point = np.squeeze(proposed_pts)[self.boundary_mask]
+#               x_lower = masked_point < self.mins
+#               x_upper = masked_point > self.maxs
+#               masked_point[x_lower] = 2 * self.mins[x_lower] - masked_point[x_lower]
+#               masked_point[x_upper] = 2 * self.maxs[x_upper] - masked_point[x_upper]
+#               #Occasionally reflection will result in points still outside of boundaries
+#               x_lower = masked_point < self.mins
+#               x_upper = masked_point > self.maxs
+#               masked_point[x_lower] = self.mins[x_lower] + np.random.rand(len(np.where(x_lower==True)[0])) * (self.maxs[x_lower]-self.mins[x_lower])
+#               masked_point[x_upper] = self.mins[x_upper] + np.random.rand(len(np.where(x_upper==True)[0])) * (self.maxs[x_upper]-self.mins[x_upper])
+#               if not snooker:
+#                   proposed_pts[0][self.boundary_mask] = masked_point
+#               else:
+#                   proposed_pts[self.boundary_mask] = masked_point
                
         if not snooker:
             return proposed_pts

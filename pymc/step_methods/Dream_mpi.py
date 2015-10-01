@@ -10,7 +10,7 @@ from .arraystep import *
 import numpy as np
 from datetime import datetime
 import itertools
-from mpi4py import MPI
+#from mpi4py import MPI
 
 __all__ = ['Dream_mpi']
 
