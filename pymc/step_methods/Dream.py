@@ -496,37 +496,37 @@ class Dream(ArrayStep):
             proposed_pts, snooker_logp, z = self.snooker_update(n_proposed_pts, q0)
 
         #If uniform priors were used, check that proposed points are within bounds and reflect if not.
-        if self.boundaries:
-           if n_proposed_pts > 1:
-               for pt_num in range(n_proposed_pts):
-                   masked_point = proposed_pts[pt_num][self.boundary_mask]
-                   x_lower = masked_point < self.mins
-                   x_upper = masked_point > self.maxs
-                   masked_point[x_lower] = 2 * self.mins[x_lower] - masked_point[x_lower]
-                   masked_point[x_upper] = 2 * self.maxs[x_upper] - masked_point[x_upper]
-                   #Occasionally reflection will result in points still outside of boundaries
-                   x_lower = masked_point < self.mins
-                   x_upper = masked_point > self.maxs
-                   masked_point[x_lower] = self.mins[x_lower] + np.random.rand(len(np.where(x_lower==True)[0])) * (self.maxs[x_lower]-self.mins[x_lower])
-                   masked_point[x_upper] = self.mins[x_upper] + np.random.rand(len(np.where(x_upper==True)[0])) * (self.maxs[x_upper]-self.mins[x_upper])
-                   proposed_pts[pt_num][self.boundary_mask] = masked_point
-               #print 'proposed points after boundary: ',proposed_pts
-                   
-           else:
-               masked_point = np.squeeze(proposed_pts)[self.boundary_mask]
-               x_lower = masked_point < self.mins
-               x_upper = masked_point > self.maxs
-               masked_point[x_lower] = 2 * self.mins[x_lower] - masked_point[x_lower]
-               masked_point[x_upper] = 2 * self.maxs[x_upper] - masked_point[x_upper]
-               #Occasionally reflection will result in points still outside of boundaries
-               x_lower = masked_point < self.mins
-               x_upper = masked_point > self.maxs
-               masked_point[x_lower] = self.mins[x_lower] + np.random.rand(len(np.where(x_lower==True)[0])) * (self.maxs[x_lower]-self.mins[x_lower])
-               masked_point[x_upper] = self.mins[x_upper] + np.random.rand(len(np.where(x_upper==True)[0])) * (self.maxs[x_upper]-self.mins[x_upper])
-               if not snooker:
-                   proposed_pts[0][self.boundary_mask] = masked_point
-               else:
-                   proposed_pts[self.boundary_mask] = masked_point
+#        if self.boundaries:
+#           if n_proposed_pts > 1:
+#               for pt_num in range(n_proposed_pts):
+#                   masked_point = proposed_pts[pt_num][self.boundary_mask]
+#                   x_lower = masked_point < self.mins
+#                   x_upper = masked_point > self.maxs
+#                   masked_point[x_lower] = 2 * self.mins[x_lower] - masked_point[x_lower]
+#                   masked_point[x_upper] = 2 * self.maxs[x_upper] - masked_point[x_upper]
+#                   #Occasionally reflection will result in points still outside of boundaries
+#                   x_lower = masked_point < self.mins
+#                   x_upper = masked_point > self.maxs
+#                   masked_point[x_lower] = self.mins[x_lower] + np.random.rand(len(np.where(x_lower==True)[0])) * (self.maxs[x_lower]-self.mins[x_lower])
+#                   masked_point[x_upper] = self.mins[x_upper] + np.random.rand(len(np.where(x_upper==True)[0])) * (self.maxs[x_upper]-self.mins[x_upper])
+#                   proposed_pts[pt_num][self.boundary_mask] = masked_point
+#               #print 'proposed points after boundary: ',proposed_pts
+#                   
+#           else:
+#               masked_point = np.squeeze(proposed_pts)[self.boundary_mask]
+#               x_lower = masked_point < self.mins
+#               x_upper = masked_point > self.maxs
+#               masked_point[x_lower] = 2 * self.mins[x_lower] - masked_point[x_lower]
+#               masked_point[x_upper] = 2 * self.maxs[x_upper] - masked_point[x_upper]
+#               #Occasionally reflection will result in points still outside of boundaries
+#               x_lower = masked_point < self.mins
+#               x_upper = masked_point > self.maxs
+#               masked_point[x_lower] = self.mins[x_lower] + np.random.rand(len(np.where(x_lower==True)[0])) * (self.maxs[x_lower]-self.mins[x_lower])
+#               masked_point[x_upper] = self.mins[x_upper] + np.random.rand(len(np.where(x_upper==True)[0])) * (self.maxs[x_upper]-self.mins[x_upper])
+#               if not snooker:
+#                   proposed_pts[0][self.boundary_mask] = masked_point
+#               else:
+#                   proposed_pts[self.boundary_mask] = masked_point
                
         if not snooker:
             return proposed_pts
