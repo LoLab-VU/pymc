@@ -260,9 +260,9 @@ class Dream(ArrayStep):
                     print 'in all infinite loop'
                     with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
                         if run_snooker:
-                            proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
+                            proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)
                         else:
-                            proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
+                            proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=False)
                 
                         if self.multitry > 1:
                             if self.boundaries:
@@ -287,9 +287,13 @@ class Dream(ArrayStep):
                                         x_upper = np.zeros(np.array(proposed_pts[0]).shape)
                                         masked_point = proposed_pts[pt_num][self.boundary_mask]
                                         x_lower = masked_point < self.mins
-                                        x_upper = masked_point > self.maxs                       
-
+                                        x_upper = masked_point > self.maxs     
+                                        
                             print n,' draws needed to find proposal points inside bounds.'
+                    
+                    log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
+
+                            
                 
                 q_proposal, q_logp = self.mt_choose_proposal_pt(log_ps, proposed_pts)
             
