@@ -211,20 +211,17 @@ def _choose_backend(trace, chain, shortcuts=None, **kwds):
 def _mp_sample(njobs, args):
     # If using DREAM stepping method, allocate a shared history array, a count variable, and a variable denoting whether or not the history has been seeded with draws from the prior.   
     if 'Dream' in str(args[0]):
-       p = mp_dream_pool(njobs, args)
+       p = _mp_dream_pool(njobs, args)
     else:
        p = mp.Pool(njobs)
-    print 'Jobs launched'
-    try:
-        traces = p.map(argsample, args)
-    except Exception as e:
-        traceback.print_exc()
-        raise e
+
+    traces = p.map(argsample, args)
+
     p.close()
     p.join()
     return merge_traces(traces)
 
-def mp_dream_pool(njobs, args):
+def _mp_dream_pool(njobs, args):
     step_method = args[0][1]
     min_njobs = (2*len(step_method.DEpairs))+1
     if njobs < min_njobs:
@@ -233,7 +230,9 @@ def mp_dream_pool(njobs, args):
         old_history = np.load(step_method.history_file)
         len_old_history = len(old_history.flatten())
         nold_history_records = len_old_history/step_method.total_var_dimension
-        step_method.nseedchains = nold_history_records
+        for chain in range(len(args)):
+            method = args[chain][1]
+            method.nseedchains = nold_history_records
         if args[0][0] < step_method.history_thin:
             arr_dim = ((np.floor(njobs*args[0][0]/step_method.history_thin)+njobs)*step_method.total_var_dimension)+len_old_history
         else:
@@ -260,13 +259,22 @@ def mp_dream_pool(njobs, args):
     n = mp.Value('i', 0)
     tf = mp.Value('c', 'F')
     if step_method.crossover_burnin == None:
-        step_method.crossover_burnin = int(np.floor(args[0][0]/10))
+        for chain in range(len(args)):
+            method = args[chain][1]
+            method.crossover_burnin = int(np.floor(args[0][0]/10))
+    
+    if args[0][2] != None:
+        if step_method.start_random:
+            print 'Warning: start position provided but random_start set to True.  Overrode random_start value and starting walk at provided start position.'
+            for chain in range(len(args)):
+                method = args[chain][1]
+                method.start_random = False
 
-    p = DreamPool(njobs, initializer=mp_dream_init, initargs=(history_arr, current_position_arr, nchains, crossover_probabilities, ncrossover_updates, delta_m, n, tf, ))
+    p = DreamPool(njobs, initializer=_mp_dream_init, initargs=(history_arr, current_position_arr, nchains, crossover_probabilities, ncrossover_updates, delta_m, n, tf, ))
     
     return p
 
-def mp_dream_init(arr, cp_arr, nchains, crossover_probs, ncrossover_updates, delta_m, val, switch):
+def _mp_dream_init(arr, cp_arr, nchains, crossover_probs, ncrossover_updates, delta_m, val, switch):
       step_methods.Dream_shared_vars.history = arr
       step_methods.Dream_shared_vars.current_positions = cp_arr
       step_methods.Dream_shared_vars.nchains = nchains

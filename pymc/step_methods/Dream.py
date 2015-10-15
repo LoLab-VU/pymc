@@ -213,21 +213,8 @@ class Dream(ArrayStep):
                 q_logp = logp(np.squeeze(proposed_pts))
                 q = np.squeeze(proposed_pts)
             else:
-                #mp.log_to_stderr(logging.DEBUG)
                 
                 log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
-                
-#                #If any log_ps are -inf, redraw points                
-#                while np.any(log_ps == -np.inf):
-#                    with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-#                        #Generate proposal points
-#                        if not run_snooker:
-#                            proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=False)
-#                    
-#                        else:
-#                            proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)   
-#                            
-#                    log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
                     
                 #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
                 while np.all(np.isfinite(np.array(log_ps))==False):
@@ -249,16 +236,6 @@ class Dream(ArrayStep):
                     
                 #Compute posterior density at reference points.
                 ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, logp, all_vars_point, ref=True)
-                
-#                #If any reference logps are -inf, redraw
-#                while np.any(ref_log_ps == -np.inf):
-#                    with Dream_shared_vars.history.get_lock() and Dream_shared_vars.count.get_lock():
-#                        if run_snooker:
-#                            reference_pts, snooker_logp_ref, z_ref = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
-#                        else:
-#                            reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
-#                            
-#                    ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, logp, all_vars_point, ref=True)
         
             if self.multitry > 1:
                 if run_snooker:
@@ -357,7 +334,6 @@ class Dream(ArrayStep):
         #Update probabilities of tested crossover value        
         #Leave probabilities unchanged until all possible crossover values have had at least one successful move so that a given value's probability isn't prematurely set to 0, preventing further testing.
         delta_ms = np.array(Dream_shared_vars.delta_m[0:self.nCR])
-        ncr_updates = np.array(Dream_shared_vars.ncr_updates[0:self.nCR])
         
         if np.all(delta_ms != 0) == True:
 
@@ -448,25 +424,22 @@ class Dream(ArrayStep):
         if not snooker:
             
             sampled_history_pts = np.array([self.sample_from_history(self.nseedchains, DEpairs, self.total_var_dimension) for i in range(n_proposed_pts)])
-            #print 'sampled history points: ',sampled_history_pts
-            #chain_differences = np.array([np.sum(sampled_history_pts[i][0:2*DEpairs], axis=0)-np.sum(sampled_history_pts[i][2*DEpairs:DEpairs*4], axis=0) for i in range(len(sampled_history_pts))])
+            
             chain_differences = np.array([np.sum(sampled_history_pts[i][0:DEpairs], axis=0)-np.sum(sampled_history_pts[i][DEpairs:DEpairs*2], axis=0) for i in range(len(sampled_history_pts))])
-            #print 'chain differences: ',chain_differences
+
             zeta = np.array([np.random.normal(0, self.zeta, self.total_var_dimension) for i in range(n_proposed_pts)])
-            #print 'zeta: ',zeta
+
             e = np.array([np.random.uniform(-self.lamb, self.lamb, self.total_var_dimension) for i in range(n_proposed_pts)])
             e = e+1
-            #print 'e: ',e
+
             d_prime = self.total_var_dimension
             U = np.random.uniform(0, 1, size=chain_differences.shape)
-            #print 'U: ',U
             
             #Select gamma values given number of parameter dimensions to be changed (d_prime).
             if n_proposed_pts > 1:
                 d_prime = [len(U[point][np.where(U[point]<CR)]) for point in range(n_proposed_pts)]
-                #print 'd_prime: ',d_prime
                 self.gamma = [self.set_gamma(self.iter, DEpairs, snooker, d_p) for d_p in d_prime]
-                #print 'gamma: ',self.gamma
+
                 
             else:
                 d_prime = len(U[np.where(U<CR)])
@@ -475,7 +448,7 @@ class Dream(ArrayStep):
             #Generate proposed points given gamma values.
             if n_proposed_pts > 1:
                 proposed_pts = [q0 + e[point]*gamma*chain_differences[point] + zeta[point] for point, gamma in zip(range(n_proposed_pts), self.gamma)]
-                #print 'proposed points: ',proposed_pts
+
             else:
                 proposed_pts = q0+ e*self.gamma*chain_differences + zeta
 
@@ -484,7 +457,6 @@ class Dream(ArrayStep):
                 if n_proposed_pts > 1:
                     for point, pt_num in zip(proposed_pts, range(n_proposed_pts)):
                         proposed_pts[pt_num][np.where(U[pt_num]>CR)] = q0[np.where(U[pt_num]>CR)]
-                    #print 'proposed points after crossover: ',proposed_pts
 
                 else:
                     proposed_pts[np.where(U>CR)] = q0[np.where(U>CR)[1]] 
@@ -503,13 +475,13 @@ class Dream(ArrayStep):
                    x_upper = masked_point > self.maxs
                    masked_point[x_lower] = 2 * self.mins[x_lower] - masked_point[x_lower]
                    masked_point[x_upper] = 2 * self.maxs[x_upper] - masked_point[x_upper]
+                   
                    #Occasionally reflection will result in points still outside of boundaries
                    x_lower = masked_point < self.mins
                    x_upper = masked_point > self.maxs
                    masked_point[x_lower] = self.mins[x_lower] + np.random.rand(len(np.where(x_lower==True)[0])) * (self.maxs[x_lower]-self.mins[x_lower])
                    masked_point[x_upper] = self.mins[x_upper] + np.random.rand(len(np.where(x_upper==True)[0])) * (self.maxs[x_upper]-self.mins[x_upper])
                    proposed_pts[pt_num][self.boundary_mask] = masked_point
-               #print 'proposed points after boundary: ',proposed_pts
                    
            else:
                masked_point = np.squeeze(proposed_pts)[self.boundary_mask]
@@ -517,6 +489,7 @@ class Dream(ArrayStep):
                x_upper = masked_point > self.maxs
                masked_point[x_lower] = 2 * self.mins[x_lower] - masked_point[x_lower]
                masked_point[x_upper] = 2 * self.maxs[x_upper] - masked_point[x_upper]
+               
                #Occasionally reflection will result in points still outside of boundaries
                x_lower = masked_point < self.mins
                x_upper = masked_point > self.maxs
@@ -544,6 +517,7 @@ class Dream(ArrayStep):
 
         if n_proposed_pts > 1:
             D = [np.dot(proj_vec_diff[point], proj_vec_diff[point]) for point in range(len(proj_vec_diff))]
+            
             #Orthogonal projection of chains_to_projected onto projection vector
             diff_chains_to_be_projected = [(chains_to_be_projected[point][0]-chains_to_be_projected[point][1]) for point in range(n_proposed_pts)]       
             zP = np.nan_to_num(np.array([np.sum(diff_chains_to_be_projected[point]*proj_vec_diff[point])/D[point] for point in range(n_proposed_pts)]))          
@@ -564,6 +538,7 @@ class Dream(ArrayStep):
     
     def mt_evaluate_logps(self, parallel, multitry, proposed_pts, logp, all_vars_pt, ref=False):
         """Evaluate the log probability for multiple points in serial or parallel when using multi-try."""
+        
         #If using multi-try and running in parallel farm out proposed points to process pool.
         if parallel:
             p = mp.Pool(multitry)
@@ -571,6 +546,7 @@ class Dream(ArrayStep):
             log_ps = p.map(call_logp, args)
             p.close()
             p.join()
+            
         else:
             log_ps = []
             if multitry == 2:
