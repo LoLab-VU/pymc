@@ -139,15 +139,27 @@ def sample(draws, step=None, start=None, trace=None, chain=0, njobs=1, tune=None
 
         pbars = [progressbar] + [False] * (njobs - 1)
 
-        argset = zip([draws] * njobs,
+        if isinstance(start, list):
+             argset = zip([draws] * njobs,
                      [step] * njobs,
-                     [start] * njobs,
+                     start,
                      [trace] * njobs,
                      chains,
                      [tune] * njobs,
                      pbars,
                      [model] * njobs,
-                     random_seeds)
+                     random_seeds)   
+        else:
+            argset = zip([draws] * njobs,
+                         [step] * njobs,
+                         [start] * njobs,
+                         [trace] * njobs,
+                         chains,
+                         [tune] * njobs,
+                         pbars,
+                         [model] * njobs,
+                         random_seeds)
+        
         sample_func = _mp_sample
         sample_args = [njobs, argset]
     else:
@@ -330,7 +342,7 @@ def _mp_dream_pool(njobs, args):
     
     if args[0][2] != None:
         if step_method.start_random:
-            print 'Warning: start position provided but random_start set to True.  Overrode random_start value and starting walk at provided start position.'
+            print('Warning: start position provided but random_start set to True.  Overrode random_start value and starting walk at provided start position.')
             for chain in range(len(args)):
                 method = args[chain][1]
                 method.start_random = False
