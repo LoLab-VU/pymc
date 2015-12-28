@@ -20,7 +20,7 @@ __all__ = ['Dream']
 
 class Dream(ArrayStep):
     """An implementation of the MT-DREAM(ZS) algorithm introduced in:
-        Laloy, E. & Vrugt, J. A. High-dimensional posterior exploration of hydrologic models using multiple-try DREAM (ZS)and high-performance computing. Water Resources Research 48, W01526 (2012).
+        Laloy, E. & Vrugt, J. A. High-dimensional posterior exploration of hydrologic models using multiple-try DREAM (ZS) and high-performance computing. Water Resources Research 48, W01526 (2012).
     
     Parameters
     ----------
@@ -86,7 +86,7 @@ class Dream(ArrayStep):
         if crossover_file:
             self.CR_probabilities = np.load(crossover_file)
             if adapt_crossover:
-                print 'Warning: Crossover values loaded but adapt_crossover = True.  Overrode adapt_crossover input and not adapting crossover values.'
+                print('Warning: Crossover values loaded but adapt_crossover = True.  Overrode adapt_crossover input and not adapting crossover values.')
                 self.adapt_crossover = False
         else:
             self.CR_probabilities = [1/float(self.nCR) for i in range(self.nCR)]
@@ -113,18 +113,24 @@ class Dream(ArrayStep):
             self.total_var_dimension += var_name.dsize
             if isinstance(var_name.distribution, Uniform):
               self.boundaries = True
+        print 'boundaries: ',self.boundaries
         if self.boundaries:
             self.boundary_mask = np.zeros((self.total_var_dimension), dtype=bool)
             self.mins = []
             self.maxs = []
             n = 0
             for var in variables:
+                var_name = getattr(model, str(var))
                 if isinstance(var_name.distribution, Uniform):
                     self.boundary_mask[n:n+var_name.dsize] = True
+                    print 'var distribution lower: ',var_name.distribution.lower
+                    print 'var distribution upper: ',var_name.distribution.upper
                     self.mins.append(var_name.distribution.lower)
                     self.maxs.append(var_name.distribution.upper)
             self.mins = np.squeeze(np.array(self.mins))
             self.maxs = np.squeeze(np.array(self.maxs))
+            print 'mins: ',self.mins
+            print 'maxs: ',self.maxs
         if self.nseedchains == None:
             self.nseedchains = self.total_var_dimension*10
         gamma_array = np.zeros((self.total_var_dimension, DEpairs))
@@ -156,10 +162,10 @@ class Dream(ArrayStep):
                 with Dream_shared_vars.history_seeded.get_lock() and Dream_shared_vars.history.get_lock():
                     if not self.history_file:
                         if self.verbose:
-                            print 'History file not loaded.'
+                            print('History file not loaded.')
                         if Dream_shared_vars.history_seeded.value == 'F':
                             if self.verbose:
-                                print 'Seeding history with ',self.nseedchains,' draws from prior.'
+                                print('Seeding history with ',self.nseedchains,' draws from prior.')
                             for i in range(self.nseedchains):
                                 start_loc = i*self.total_var_dimension
                                 end_loc = start_loc+self.total_var_dimension
@@ -167,16 +173,16 @@ class Dream(ArrayStep):
                             Dream_shared_vars.history_seeded.value = 'T'
                     else:
                         if self.verbose:
-                            print 'History file loaded.'
+                            print('History file loaded.')
                     if self.verbose:
-                        print 'Setting crossover probability starting values.'
-                        print 'set prob of different crossover values to: ',self.CR_probabilities
+                        print('Setting crossover probability starting values.')
+                        print('Set probability of different crossover values to: ',self.CR_probabilities)
                     if self.start_random:
                         if self.verbose:
-                            print 'Setting start to random draw from prior.'
+                            print('Setting start to random draw from prior.')
                         q0 = self.draw_from_prior(self.model, self.variables)
                     if self.verbose:
-                        print 'Start: ',q0
+                        print('Start: ',q0)
                 # Also get length of history array so we know when to save it at end of run.
                 if self.save_history:
                     with Dream_shared_vars.history.get_lock():
@@ -268,10 +274,10 @@ class Dream(ArrayStep):
                     q_new = metrop_select(np.nan_to_num(q_logp) - np.nan_to_num(self.last_logp), q, q0) 
                     
             if not np.array_equal(q0, q_new):
-                #print 'Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference)
+                print('Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference))
                 self.last_logp = q_logp
-            #else:
-                #print 'Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference)
+            else:
+                print('Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference))
                 
         
             #Place new point in history given history thinning rate
@@ -302,6 +308,7 @@ class Dream(ArrayStep):
         return q_new
         
     def set_current_position_arr(self, ndimensions, q_new):
+        """Add current position of chain to shared array available to other chains."""
         if self.chain_n == None:
             with Dream_shared_vars.nchains.get_lock():
                 self.chain_n = Dream_shared_vars.nchains.value-1
@@ -409,7 +416,6 @@ class Dream(ArrayStep):
     def sample_from_history(self, nseedchains, DEpairs, ndimensions, snooker=False):
         """Draw random point from the history array."""
         if not snooker:
-            #chain_num = random.sample(range(Dream_shared_vars.count.value+nseedchains), DEpairs*4)
             chain_num = random.sample(range(Dream_shared_vars.count.value+nseedchains), DEpairs*2)
         else:
             chain_num = random.sample(range(Dream_shared_vars.count.value+nseedchains), 1)
@@ -600,12 +606,12 @@ class Dream(ArrayStep):
         """Save history and crossover probabilities to files at end of run."""
         
         filename = prefix+'DREAM_chain_history.npy'
-        print 'Saving history to file: ',filename
+        print('Saving history to file: ',filename)
         np.save(filename, history)
         
         #Also save crossover probabilities if adapted
         filename = prefix+'DREAM_chain_adapted_crossoverprob.npy'
-        print 'Saving fitted crossover values: ',self.CR_probabilities,' to file: ',filename
+        print('Saving fitted crossover values: ',self.CR_probabilities,' to file: ',filename)
         np.save(filename, self.CR_probabilities)
     
 def call_logp(args):
