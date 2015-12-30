@@ -119,6 +119,7 @@ class Dream(ArrayStep):
             self.maxs = []
             n = 0
             for var in variables:
+                var_name = getattr(model, str(var))
                 if isinstance(var_name.distribution, Uniform):
                     self.boundary_mask[n:n+var_name.dsize] = True
                     self.mins.append(var_name.distribution.lower)
@@ -267,11 +268,11 @@ class Dream(ArrayStep):
                 else:
                     q_new = metrop_select(np.nan_to_num(q_logp) - np.nan_to_num(self.last_logp), q, q0) 
                     
-#            if not np.array_equal(q0, q_new):
-#                print('Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference))
-#                self.last_logp = q_logp
-#            else:
-#                print('Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference))
+            if not np.array_equal(q0, q_new):
+                #print('Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference))
+                self.last_logp = q_logp
+            #else:
+            #    print('Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference))
                 
         
             #Place new point in history given history thinning rate
