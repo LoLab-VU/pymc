@@ -113,6 +113,7 @@ class Dream(ArrayStep):
             self.total_var_dimension += var_name.dsize
             if isinstance(var_name.distribution, Uniform):
               self.boundaries = True
+        print 'boundaries: ',self.boundaries
         if self.boundaries:
             self.boundary_mask = np.zeros((self.total_var_dimension), dtype=bool)
             self.mins = []
@@ -122,10 +123,14 @@ class Dream(ArrayStep):
                 var_name = getattr(model, str(var))
                 if isinstance(var_name.distribution, Uniform):
                     self.boundary_mask[n:n+var_name.dsize] = True
+                    print 'var distribution lower: ',var_name.distribution.lower
+                    print 'var distribution upper: ',var_name.distribution.upper
                     self.mins.append(var_name.distribution.lower)
                     self.maxs.append(var_name.distribution.upper)
             self.mins = np.squeeze(np.array(self.mins))
             self.maxs = np.squeeze(np.array(self.maxs))
+            print 'mins: ',self.mins
+            print 'maxs: ',self.maxs
         if self.nseedchains == None:
             self.nseedchains = self.total_var_dimension*10
         gamma_array = np.zeros((self.total_var_dimension, DEpairs))
@@ -273,7 +278,6 @@ class Dream(ArrayStep):
                 self.last_logp = q_logp
             #else:
             #    print('Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference))
-                
         
             #Place new point in history given history thinning rate
             if self.iter % self.history_thin == 0:
