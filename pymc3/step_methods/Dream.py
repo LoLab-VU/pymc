@@ -6,7 +6,7 @@ Created on Wed Oct  1 17:21:29 2014
 """
 
 from ..core import modelcontext, DictToArrayBijection
-from .arraystep import ArrayStep, metrop_select
+from .arraystep import ArrayStepShared, metrop_select
 import numpy as np
 import random
 import Dream_shared_vars
@@ -15,10 +15,12 @@ import traceback
 import multiprocessing as mp
 import multiprocessing.pool as mp_pool
 from ..distributions.continuous import Uniform
+from ..theanof import inputvars, make_shared_replacements, join_nonshared_inputs
+import theano
 
 __all__ = ['Dream']
 
-class Dream(ArrayStep):
+class Dream(ArrayStepShared):
     """An implementation of the MT-DREAM(ZS) algorithm introduced in:
         Laloy, E. & Vrugt, J. A. High-dimensional posterior exploration of hydrologic models using multiple-try DREAM (ZS) and high-performance computing. Water Resources Research 48, W01526 (2012).
     
@@ -72,7 +74,9 @@ class Dream(ArrayStep):
                 
         if variables is None:
             variables = model.cont_vars
-        
+
+        shared = make_shared_replacements(variables, model) 
+
         if not set(variables).issubset(set(model.cont_vars)):
             raise Exception('The implemented version of Dream should only be run on continuous variables.')
         
@@ -113,6 +117,7 @@ class Dream(ArrayStep):
             self.total_var_dimension += var_name.dsize
             if isinstance(var_name.distribution, Uniform):
               self.boundaries = True
+        
         if self.boundaries:
             self.boundary_mask = np.zeros((self.total_var_dimension), dtype=bool)
             self.mins = []
@@ -124,6 +129,8 @@ class Dream(ArrayStep):
                     self.boundary_mask[n:n+var_name.dsize] = True
                     self.mins.append(var_name.distribution.lower)
                     self.maxs.append(var_name.distribution.upper)
+                n += var_name.dsize
+
             self.mins = np.squeeze(np.array(self.mins))
             self.maxs = np.squeeze(np.array(self.maxs))
         if self.nseedchains == None:
@@ -141,10 +148,10 @@ class Dream(ArrayStep):
         self.history_thin = history_thin
         self.start_random = start_random
         self.verbose = verbose
-        
-        super(Dream, self).__init__(variables, [model.fastlogp], allvars=True, **kwargs)
+        self.logp = logp(model.logpt, variables, shared)
+        super(Dream, self).__init__(variables, shared)
     
-    def astep(self, q0, logp, all_vars_point):
+    def astep(self, q0):
         # On first iteration, check that shared variables have been initialized (which only occurs if multiple chains have been started).
         if self.iter == 0:   
  
@@ -207,15 +214,15 @@ class Dream(ArrayStep):
                     proposed_pts, snooker_logp_prop, z = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=True)                 
                     
             if self.last_logp == None:
-                self.last_logp = logp(q0)            
+                self.last_logp = self.logp(q0)            
             
             #Evaluate logp(s)
             if self.multitry == 1:
-                q_logp = logp(np.squeeze(proposed_pts))
+                q_logp = self.logp(np.squeeze(proposed_pts))
                 q = np.squeeze(proposed_pts)
             else:
                 
-                log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
+                log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, self.logp, ref=False)
                     
                 #Check if all logps are -inf, in which case they'll all be impossible and we need to generate more proposal points
                 while np.all(np.isfinite(np.array(log_ps))==False):
@@ -224,7 +231,7 @@ class Dream(ArrayStep):
                     else:
                         proposed_pts = self.generate_proposal_points(self.multitry, q0, CR, DEpair_choice, snooker=run_snooker)
                         
-                    log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, logp, all_vars_point, ref=False)
+                    log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, proposed_pts, self.logp, ref=False)
                     
                 q_proposal, q_logp = self.mt_choose_proposal_pt(log_ps, proposed_pts)
             
@@ -236,7 +243,7 @@ class Dream(ArrayStep):
                         reference_pts = self.generate_proposal_points(self.multitry-1, q_proposal, CR, DEpair_choice, snooker=run_snooker)
                     
                 #Compute posterior density at reference points.
-                ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, logp, all_vars_point, ref=True)
+                ref_log_ps = self.mt_evaluate_logps(self.parallel, self.multitry, reference_pts, self.logp, ref=True)
         
             if self.multitry > 1:
                 if run_snooker:
@@ -269,11 +276,10 @@ class Dream(ArrayStep):
                     q_new = metrop_select(np.nan_to_num(q_logp) - np.nan_to_num(self.last_logp), q, q0) 
                     
             if not np.array_equal(q0, q_new):
-                #print('Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference))
+                print('Accepted point.  New logp: ',q_logp,' old logp: ',self.last_logp)#,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference))
                 self.last_logp = q_logp
-            #else:
-            #    print('Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference))
-                
+            else:
+                print('Did not accept point.  Kept old logp: ',self.last_logp,' Tested logp: ',q_logp)#,' weight proposed: ',log_ps,' weight ref: ',ref_log_ps,' ratio: ',np.sum(weight_proposed)/np.sum(weight_reference))
         
             #Place new point in history given history thinning rate
             if self.iter % self.history_thin == 0:
@@ -425,7 +431,7 @@ class Dream(ArrayStep):
         if not snooker:
             
             sampled_history_pts = np.array([self.sample_from_history(self.nseedchains, DEpairs, self.total_var_dimension) for i in range(n_proposed_pts)])
-            
+
             chain_differences = np.array([np.sum(sampled_history_pts[i][0:DEpairs], axis=0)-np.sum(sampled_history_pts[i][DEpairs:DEpairs*2], axis=0) for i in range(len(sampled_history_pts))])
 
             zeta = np.array([np.random.normal(0, self.zeta, self.total_var_dimension) for i in range(n_proposed_pts)])
@@ -451,8 +457,8 @@ class Dream(ArrayStep):
                 proposed_pts = [q0 + e[point]*gamma*chain_differences[point] + zeta[point] for point, gamma in zip(range(n_proposed_pts), self.gamma)]
 
             else:
-                proposed_pts = q0+ e*self.gamma*chain_differences + zeta
-
+                proposed_pts = q0+ e*self.gamma*chain_differences + zeta             
+                
             #Crossover proposed points based on number of parameter dimensions to be changed.
             if np.any(d_prime != self.total_var_dimension):
                 if n_proposed_pts > 1:
@@ -461,7 +467,7 @@ class Dream(ArrayStep):
 
                 else:
                     proposed_pts[np.where(U>CR)] = q0[np.where(U>CR)[1]] 
-        
+
         else:
             #With a snooker update all CR always equals 1 (i.e. all parameter dimensions are changed).
             self.gamma = self.set_gamma(self.iter, DEpairs, snooker, self.total_var_dimension)
@@ -500,7 +506,7 @@ class Dream(ArrayStep):
                    proposed_pts[0][self.boundary_mask] = masked_point
                else:
                    proposed_pts[self.boundary_mask] = masked_point
-               
+
         if not snooker:
             return proposed_pts
         else:
@@ -537,13 +543,13 @@ class Dream(ArrayStep):
         
         return proposed_pts, snooker_logp, sampled_history_pt
     
-    def mt_evaluate_logps(self, parallel, multitry, proposed_pts, logp, all_vars_pt, ref=False):
+    def mt_evaluate_logps(self, parallel, multitry, proposed_pts, logp, ref=False):
         """Evaluate the log probability for multiple points in serial or parallel when using multi-try."""
         
         #If using multi-try and running in parallel farm out proposed points to process pool.
         if parallel:
             p = mp.Pool(multitry)
-            args = zip([self]*multitry, np.squeeze(proposed_pts), [all_vars_pt]*multitry)
+            args = zip([self]*multitry, np.squeeze(proposed_pts))
             log_ps = p.map(call_logp, args)
             p.close()
             p.join()
@@ -608,18 +614,21 @@ class Dream(ArrayStep):
         filename = prefix+'DREAM_chain_adapted_crossoverprob.npy'
         print('Saving fitted crossover values: ',self.CR_probabilities,' to file: ',filename)
         np.save(filename, self.CR_probabilities)
+
+def logp(logp, vars, shared):
+    [logp0], inarray0 = join_nonshared_inputs([logp], vars, shared)
+    f = theano.function([inarray0], logp0)
+    f.trust_input = True
+    return f
     
 def call_logp(args):
     #Defined at top level so it can be pickled.
     instance = args[0]
     tested_point = args[1]
-    original_point = args[2]
     
-    logp_fxn = getattr(instance, 'fs')[0]
-    ordering = getattr(instance, 'ordering')
-    bij = DictToArrayBijection(ordering, original_point)
-    logp = bij.mapf(logp_fxn)
-    return logp(tested_point)
+    logp_fxn = getattr(instance, 'logp')
+    
+    return logp_fxn(tested_point)
 
         
 class NoDaemonProcess(mp.Process):

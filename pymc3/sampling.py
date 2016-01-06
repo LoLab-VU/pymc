@@ -8,9 +8,10 @@ from .step_methods import *
 from .progressbar import progress_bar
 from numpy.random import seed
 from step_methods.Dream import DreamPool
+from numpy.random import randint, seed
 from collections import defaultdict
 
-__all__ = ['sample', 'iter_sample']
+__all__ = ['sample', 'iter_sample', 'sample_ppc']
 
 def assign_step_methods(model, step=None,
         methods=(NUTS, HamiltonianMC, Metropolis, BinaryMetropolis, 
@@ -62,7 +63,7 @@ def assign_step_methods(model, step=None,
 
             selected = max(competences.keys(), key=(lambda k: competences[k]))
             
-            print('Assigned {0} to {1}'.format(selected, var))
+            print('Assigned {0} to {1}'.format(selected.__name__, var))
             selected_steps[selected].append(var)
     
     # Instantiate all selected step methods
@@ -352,14 +353,14 @@ def _mp_dream_pool(njobs, args):
     return p
 
 def _mp_dream_init(arr, cp_arr, nchains, crossover_probs, ncrossover_updates, delta_m, val, switch):
-      step_methods.Dream_shared_vars.history = arr
-      step_methods.Dream_shared_vars.current_positions = cp_arr
-      step_methods.Dream_shared_vars.nchains = nchains
-      step_methods.Dream_shared_vars.cross_probs = crossover_probs
-      step_methods.Dream_shared_vars.ncr_updates = ncrossover_updates
-      step_methods.Dream_shared_vars.delta_m = delta_m
-      step_methods.Dream_shared_vars.count = val
-      step_methods.Dream_shared_vars.history_seeded = switch
+      Dream_shared_vars.history = arr
+      Dream_shared_vars.current_positions = cp_arr
+      Dream_shared_vars.nchains = nchains
+      Dream_shared_vars.cross_probs = crossover_probs
+      Dream_shared_vars.ncr_updates = ncrossover_updates
+      Dream_shared_vars.delta_m = delta_m
+      Dream_shared_vars.count = val
+      Dream_shared_vars.history_seeded = switch
 
 def stop_tuning(step):
     """ stop tuning the current step method """
@@ -382,3 +383,46 @@ def _soft_update(a, b):
     """As opposed to dict.update, don't overwrite keys if present.
     """
     a.update({k: v for k, v in b.items() if k not in a})
+
+
+def sample_ppc(trace, samples=None, model=None, vars=None, size=None):
+    """Generate posterior predictive samples from a model given a trace.
+
+    Parameters
+    ----------
+    trace : backend, list, or MultiTrace
+        Trace generated from MCMC sampling
+    samples : int
+        Number of posterior predictive samples to generate. Defaults to the
+        length of `trace`
+    model : Model (optional if in `with` context)
+        Model used to generate `trace`
+    vars : iterable
+        Variables for which to compute the posterior predictive samples.
+        Defaults to `model.observed_RVs`.
+    size : int
+        The number of random draws from the distribution specified by the
+        parameters in each sample of the trace.
+
+    Returns
+    -------
+    Dictionary keyed by `vars`, where the values are the corresponding
+    posterior predictive samples.
+    """
+    if samples is None:
+        samples = len(trace)
+
+    if model is None:
+        model = modelcontext(model)
+
+    if vars is None:
+        vars = model.observed_RVs
+
+    ppc = defaultdict(list)
+    for idx in randint(0, len(trace), samples):
+        param = trace[idx]
+        for var in vars:
+            ppc[var.name].append(var.distribution.random(point=param,
+                                                         size=size))
+
+    return {k: np.asarray(v) for k, v in ppc.items()}
